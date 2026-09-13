@@ -4,6 +4,7 @@ using FrameForge.CS2;
 using FrameForge.CS2.Settings;
 using FrameForge.Hardware;
 using FrameForge.Infrastructure.Backup;
+using FrameForge.Infrastructure.CustomOptimization;
 using FrameForge.Infrastructure.Dashboard;
 using FrameForge.Infrastructure.Guided;
 using FrameForge.Infrastructure.Logging;
@@ -44,6 +45,8 @@ public static class ServiceRegistration
         services.AddSingleton<IBenchmarkEngine, BenchmarkEngine>();
         services.AddSingleton<IGuidedOptimizationStore, GuidedOptimizationStore>();
         services.AddSingleton<IGuidedOptimizationService, GuidedOptimizationService>();
+        services.AddSingleton<IIndividualOptimizationCatalog, IndividualOptimizationCatalog>();
+        services.AddSingleton<ICustomOptimizationSetStore, CustomOptimizationSetStore>();
         return services;
     }
 

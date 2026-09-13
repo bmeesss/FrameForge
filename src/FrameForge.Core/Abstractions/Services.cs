@@ -148,6 +148,41 @@ public interface IPathService
     string BackupMetadataPath { get; }
     string BenchmarksDirectory { get; }
     string GuidedRunsDirectory { get; }
+    string CustomOptimizationSetsDirectory { get; }
+}
+
+/// <summary>
+/// Builds the user-facing individual optimization catalog from supported CS2 settings.
+/// Filtering is in-memory only.
+/// </summary>
+public interface IIndividualOptimizationCatalog
+{
+    /// <summary>
+    /// Build catalog items, optionally enriching CurrentValue from a settings snapshot.
+    /// </summary>
+    IReadOnlyList<IndividualOptimizationItem> BuildCatalog(Cs2SettingsSnapshot? snapshot = null);
+
+    IReadOnlyList<IndividualOptimizationItem> Filter(
+        IEnumerable<IndividualOptimizationItem> items,
+        IndividualOptimizationFilter filter);
+
+    IndividualOptimizationItem? GetByConfigKey(string configKey, Cs2SettingsSnapshot? snapshot = null);
+}
+
+/// <summary>
+/// Persists custom optimization sets separately from built-in/custom profiles.
+/// </summary>
+public interface ICustomOptimizationSetStore
+{
+    Task<IReadOnlyList<CustomOptimizationSet>> ListAsync(CancellationToken cancellationToken = default);
+    Task<CustomOptimizationSet?> GetAsync(string setId, CancellationToken cancellationToken = default);
+    Task<string> SaveAsync(CustomOptimizationSet set, CancellationToken cancellationToken = default);
+    Task DeleteAsync(string setId, CancellationToken cancellationToken = default);
+    Task<CustomOptimizationSet> DuplicateAsync(string setId, string? newName = null, CancellationToken cancellationToken = default);
+    Task RenameAsync(string setId, string newName, CancellationToken cancellationToken = default);
+    CustomOptimizationSetValidationResult Validate(CustomOptimizationSet set);
+    Task<CustomOptimizationSetImportResult> ImportAsync(string sourcePath, CancellationToken cancellationToken = default);
+    Task ExportAsync(string setId, string destinationPath, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

@@ -25,6 +25,8 @@ public sealed class MainViewModel : ViewModelBase
     private readonly IBenchmarkStore _benchmarkStore;
     private readonly IGuidedOptimizationService _guided;
     private readonly IGuidedOptimizationStore _guidedStore;
+    private readonly IIndividualOptimizationCatalog _individualCatalog;
+    private readonly ICustomOptimizationSetStore _customSetStore;
     private readonly IAppLog _log;
 
     private string _currentPage = "Home";
@@ -55,6 +57,8 @@ public sealed class MainViewModel : ViewModelBase
         IBenchmarkStore benchmarkStore,
         IGuidedOptimizationService guided,
         IGuidedOptimizationStore guidedStore,
+        IIndividualOptimizationCatalog individualCatalog,
+        ICustomOptimizationSetStore customSetStore,
         IAppLog log)
     {
         _dashboardService = dashboardService;
@@ -71,6 +75,8 @@ public sealed class MainViewModel : ViewModelBase
         _benchmarkStore = benchmarkStore;
         _guided = guided;
         _guidedStore = guidedStore;
+        _individualCatalog = individualCatalog;
+        _customSetStore = customSetStore;
         _log = log;
         _guided.StatusChanged += (_, _) =>
         {
@@ -172,13 +178,45 @@ public sealed class MainViewModel : ViewModelBase
         ExportBenchmarkCsvCommand = new AsyncRelayCommand(ExportBenchmarkCsvAsync, () => SelectedBenchmarkA is not null);
         DeleteBenchmarkCommand = new AsyncRelayCommand(DeleteSelectedBenchmarkAsync, () => SelectedBenchmarkA is not null && !IsBenchmarkRunning);
 
-        StartGuidedCommand = new AsyncRelayCommand(StartGuidedAsync, () => !IsGuidedRunning && !IsBenchmarkRunning && SelectedProfile is not null);
-        PreviewGuidedCommand = new AsyncRelayCommand(PreviewGuidedAsync, () => !IsGuidedRunning && SelectedProfile is not null);
+        StartGuidedCommand = new AsyncRelayCommand(StartGuidedAsync, () => !IsGuidedRunning && !IsBenchmarkRunning && (SelectedProfile is not null || HasCustomSelection));
+        PreviewGuidedCommand = new AsyncRelayCommand(PreviewGuidedAsync, () => !IsGuidedRunning && (SelectedProfile is not null || HasCustomSelection));
         ConfirmGuidedCommand = new RelayCommand(() => _guided.ConfirmApply(), () => IsGuidedAwaitingConfirmation);
         CancelGuidedCommand = new RelayCommand(() => _guided.Cancel(), () => IsGuidedRunning);
         KeepGuidedCommand = new RelayCommand(() => _guided.Decide(GuidedUserDecision.Keep), () => IsGuidedAwaitingDecision);
         RestoreGuidedCommand = new RelayCommand(() => _guided.Decide(GuidedUserDecision.Restore), () => IsGuidedAwaitingDecision);
         RefreshGuidedHistoryCommand = new AsyncRelayCommand(LoadGuidedHistoryAsync, () => !IsBusy);
+
+        // Phase 6 — Custom / individual optimization
+        RefreshCustomCatalogCommand = new AsyncRelayCommand(RefreshCustomCatalogAsync, () => !IsBusy);
+        SelectAllVisibleCustomCommand = new RelayCommand(() =>
+        {
+            foreach (var row in CustomOptimizationRows)
+            {
+                row.IsSelected = true;
+            }
+            NotifyCustomSelectionChanged();
+        }, () => CustomOptimizationRows.Count > 0);
+        ClearCustomSelectionCommand = new RelayCommand(() =>
+        {
+            _customSelectedKeys.Clear();
+            foreach (var row in CustomOptimizationRows)
+            {
+                row.IsSelected = false;
+            }
+            NotifyCustomSelectionChanged();
+            ApplyCustomFilter();
+        }, () => HasCustomSelection);
+        ApplyRecommendedToSelectionCommand = new RelayCommand(ApplyRecommendedValuesToSelected, () => HasCustomSelection);
+        PreviewCustomSelectionCommand = new AsyncRelayCommand(PreviewCustomSelectionAsync, () => !IsBusy && HasCustomSelection);
+        GuidedCustomSelectionCommand = new AsyncRelayCommand(StartGuidedCustomAsync, () => !IsGuidedRunning && !IsBenchmarkRunning && HasCustomSelection);
+        QuickTestSingleSettingCommand = new AsyncRelayCommand(QuickTestSingleSettingAsync, () => !IsGuidedRunning && !IsBenchmarkRunning && CustomSelectedCount == 1);
+        SaveCustomSetCommand = new AsyncRelayCommand(SaveCustomSetAsync, () => !IsBusy && HasCustomSelection);
+        SaveSelectionAsProfileCommand = new AsyncRelayCommand(SaveSelectionAsProfileAsync, () => !IsBusy && HasCustomSelection);
+        LoadCustomSetCommand = new AsyncRelayCommand(LoadSelectedCustomSetAsync, () => !IsBusy && SelectedCustomSet is not null);
+        DeleteCustomSetCommand = new AsyncRelayCommand(DeleteSelectedCustomSetAsync, () => !IsBusy && SelectedCustomSet is not null);
+        DuplicateCustomSetCommand = new AsyncRelayCommand(DuplicateSelectedCustomSetAsync, () => !IsBusy && SelectedCustomSet is not null);
+        RenameCustomSetCommand = new AsyncRelayCommand(RenameSelectedCustomSetAsync, () => !IsBusy && SelectedCustomSet is not null);
+        ResetSelectedSettingViaBackupCommand = new AsyncRelayCommand(ResetSelectedViaBackupAsync, () => !IsBusy && HasCustomSelection);
     }
 
     public ObservableCollection<OptimizationListItem> Optimizations { get; } = new();
@@ -195,6 +233,18 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<GuidedOptimizationRun> GuidedHistory { get; } = new();
     public ObservableCollection<GuidedComparisonRow> GuidedComparisonRows { get; } = new();
     public ObservableCollection<string> GuidedProgressLines { get; } = new();
+    public ObservableCollection<CustomOptimizationRowViewModel> CustomOptimizationRows { get; } = new();
+    public ObservableCollection<CustomOptimizationSet> CustomOptimizationSets { get; } = new();
+    public ObservableCollection<IndividualOptimizationUiCategory> CustomUiCategories { get; } = new();
+    public ObservableCollection<RiskLevel> CustomRiskLevels { get; } = new();
+    public IReadOnlyList<string> CustomCategoryFilterOptions { get; } = new[]
+    {
+        "(All categories)", "Performance", "Hud", "Mouse", "Audio", "Communication", "Gameplay", "Other"
+    };
+    public IReadOnlyList<string> CustomRiskFilterOptions { get; } = new[]
+    {
+        "(All risks)", "Low", "Medium", "High"
+    };
     public IReadOnlyList<int> BenchmarkDurationOptions { get; } = BenchmarkConfiguration.AllowedDurationsSeconds;
 
     public bool HasSelectedOptimizations => Optimizations.Any(o => o.IsSelected);
@@ -310,6 +360,7 @@ public sealed class MainViewModel : ViewModelBase
                 RaisePropertyChanged(nameof(IsSettingsPage));
                 RaisePropertyChanged(nameof(IsBenchmarkPage));
                 RaisePropertyChanged(nameof(IsGuidedPage));
+                RaisePropertyChanged(nameof(IsCustomPage));
             }
         }
     }
@@ -322,6 +373,7 @@ public sealed class MainViewModel : ViewModelBase
     public bool IsSettingsPage => CurrentPage.Equals("Settings", StringComparison.OrdinalIgnoreCase);
     public bool IsBenchmarkPage => CurrentPage.Equals("Benchmark", StringComparison.OrdinalIgnoreCase);
     public bool IsGuidedPage => CurrentPage.Equals("Guided", StringComparison.OrdinalIgnoreCase);
+    public bool IsCustomPage => CurrentPage.Equals("Custom", StringComparison.OrdinalIgnoreCase);
 
     public string StatusMessage
     {
@@ -440,6 +492,121 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand KeepGuidedCommand { get; }
     public ICommand RestoreGuidedCommand { get; }
     public ICommand RefreshGuidedHistoryCommand { get; }
+    public ICommand RefreshCustomCatalogCommand { get; }
+    public ICommand SelectAllVisibleCustomCommand { get; }
+    public ICommand ClearCustomSelectionCommand { get; }
+    public ICommand ApplyRecommendedToSelectionCommand { get; }
+    public ICommand PreviewCustomSelectionCommand { get; }
+    public ICommand GuidedCustomSelectionCommand { get; }
+    public ICommand QuickTestSingleSettingCommand { get; }
+    public ICommand SaveCustomSetCommand { get; }
+    public ICommand SaveSelectionAsProfileCommand { get; }
+    public ICommand LoadCustomSetCommand { get; }
+    public ICommand DeleteCustomSetCommand { get; }
+    public ICommand DuplicateCustomSetCommand { get; }
+    public ICommand RenameCustomSetCommand { get; }
+    public ICommand ResetSelectedSettingViaBackupCommand { get; }
+
+    private readonly List<IndividualOptimizationItem> _customCatalogItems = new();
+    private readonly HashSet<string> _customSelectedKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _customPendingValues = new(StringComparer.OrdinalIgnoreCase);
+
+    public bool HasCustomSelection => _customSelectedKeys.Count > 0;
+    public int CustomSelectedCount => _customSelectedKeys.Count;
+    public string CustomSelectionSummary =>
+        CustomSelectedCount == 0
+            ? "No settings selected."
+            : $"{CustomSelectedCount} setting(s) selected. Recommended values are not measured results.";
+
+    public string CustomSearchText
+    {
+        get => _customSearchText;
+        set
+        {
+            if (SetProperty(ref _customSearchText, value ?? string.Empty))
+            {
+                ApplyCustomFilter(); // in-memory only
+            }
+        }
+    }
+    private string _customSearchText = string.Empty;
+
+    public string CustomCategoryFilter
+    {
+        get => _customCategoryFilter;
+        set
+        {
+            if (SetProperty(ref _customCategoryFilter, value ?? "(All categories)"))
+            {
+                ApplyCustomFilter();
+            }
+        }
+    }
+    private string _customCategoryFilter = "(All categories)";
+
+    public string CustomRiskFilter
+    {
+        get => _customRiskFilter;
+        set
+        {
+            if (SetProperty(ref _customRiskFilter, value ?? "(All risks)"))
+            {
+                ApplyCustomFilter();
+            }
+        }
+    }
+    private string _customRiskFilter = "(All risks)";
+
+    public bool CustomOnlyChanged
+    {
+        get => _customOnlyChanged;
+        set
+        {
+            if (SetProperty(ref _customOnlyChanged, value))
+            {
+                ApplyCustomFilter();
+            }
+        }
+    }
+    private bool _customOnlyChanged;
+
+    public bool CustomOnlyRecommendedDiff
+    {
+        get => _customOnlyRecommendedDiff;
+        set
+        {
+            if (SetProperty(ref _customOnlyRecommendedDiff, value))
+            {
+                ApplyCustomFilter();
+            }
+        }
+    }
+    private bool _customOnlyRecommendedDiff;
+
+    public CustomOptimizationSet? SelectedCustomSet
+    {
+        get => _selectedCustomSet;
+        set
+        {
+            if (SetProperty(ref _selectedCustomSet, value))
+            {
+                RaiseCanExecutes();
+            }
+        }
+    }
+    private CustomOptimizationSet? _selectedCustomSet;
+
+    public string NewCustomSetName
+    {
+        get => _newCustomSetName;
+        set => SetProperty(ref _newCustomSetName, value ?? string.Empty);
+    }
+    private string _newCustomSetName = string.Empty;
+
+    public string CustomResetExplanation { get; } =
+        "Reset uses the existing FrameForge backup/restore path for managed cfg + autoexec. " +
+        "It restores the last FrameForge settings backup as a whole — not a single-key surgical restore. " +
+        "Precise single-key restore without a dedicated per-key snapshot is not guaranteed.";
 
     public bool IsGuidedRunning =>
         _guided.Status is not GuidedOptimizationStatus.Idle
@@ -685,6 +852,20 @@ public sealed class MainViewModel : ViewModelBase
         (KeepGuidedCommand as RelayCommand)?.RaiseCanExecuteChanged();
         (RestoreGuidedCommand as RelayCommand)?.RaiseCanExecuteChanged();
         (RefreshGuidedHistoryCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (RefreshCustomCatalogCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (SelectAllVisibleCustomCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (ClearCustomSelectionCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (ApplyRecommendedToSelectionCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (PreviewCustomSelectionCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (GuidedCustomSelectionCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (QuickTestSingleSettingCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (SaveCustomSetCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (SaveSelectionAsProfileCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (LoadCustomSetCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (DeleteCustomSetCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (DuplicateCustomSetCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (RenameCustomSetCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (ResetSelectedSettingViaBackupCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
     }
 
     private async Task RefreshAsync()
@@ -739,6 +920,8 @@ public sealed class MainViewModel : ViewModelBase
             await LoadCs2SettingsAsync().ConfigureAwait(true);
             await LoadBenchmarkHistoryAsync().ConfigureAwait(true);
             await LoadGuidedHistoryAsync().ConfigureAwait(true);
+            await RefreshCustomCatalogAsync().ConfigureAwait(true);
+            await LoadCustomSetsAsync().ConfigureAwait(true);
 
             _hasLoaded = true;
             RaisePropertyChanged(nameof(HasOptimizations));
@@ -1624,6 +1807,579 @@ public sealed class MainViewModel : ViewModelBase
 
 
 
+
+    public void NotifyCustomSelectionChanged()
+    {
+        RaisePropertyChanged(nameof(HasCustomSelection));
+        RaisePropertyChanged(nameof(CustomSelectedCount));
+        RaisePropertyChanged(nameof(CustomSelectionSummary));
+        RaiseCanExecutes();
+    }
+
+    public void NotifyCustomPendingValueChanged(string configKey, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(configKey))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            _customPendingValues.Remove(configKey);
+        }
+        else
+        {
+            _customPendingValues[configKey] = value.Trim();
+        }
+
+        var item = _customCatalogItems.FirstOrDefault(i =>
+            i.ConfigKey.Equals(configKey, StringComparison.OrdinalIgnoreCase));
+        if (item is not null)
+        {
+            item.PendingValue = value;
+        }
+
+        if (CustomOnlyChanged)
+        {
+            ApplyCustomFilter();
+        }
+
+        RaiseCanExecutes();
+    }
+
+    public void SetCustomRowSelected(string configKey, bool selected)
+    {
+        if (selected)
+        {
+            _customSelectedKeys.Add(configKey);
+        }
+        else
+        {
+            _customSelectedKeys.Remove(configKey);
+        }
+
+        NotifyCustomSelectionChanged();
+    }
+
+    private async Task RefreshCustomCatalogAsync()
+    {
+        try
+        {
+            if (_cs2Snapshot is null)
+            {
+                _cs2Snapshot = await _cs2SettingsService.ReadSettingsAsync().ConfigureAwait(true);
+            }
+
+            var built = _individualCatalog.BuildCatalog(_cs2Snapshot);
+            _customCatalogItems.Clear();
+            _customCatalogItems.AddRange(built);
+
+            // restore pending values onto items
+            foreach (var item in _customCatalogItems)
+            {
+                if (_customPendingValues.TryGetValue(item.ConfigKey, out var p))
+                {
+                    item.PendingValue = p;
+                }
+            }
+
+            CustomUiCategories.Clear();
+            foreach (var c in Enum.GetValues<IndividualOptimizationUiCategory>())
+            {
+                CustomUiCategories.Add(c);
+            }
+
+            CustomRiskLevels.Clear();
+            foreach (var r in new[] { RiskLevel.Low, RiskLevel.Medium, RiskLevel.High })
+            {
+                CustomRiskLevels.Add(r);
+            }
+
+            ApplyCustomFilter();
+            StatusMessage = $"Custom catalog: {_customCatalogItems.Count} supported setting(s).";
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning($"Custom catalog refresh failed: {ex.Message}");
+            ErrorMessage = ex.Message;
+        }
+    }
+
+    private void ApplyCustomFilter()
+    {
+        IndividualOptimizationUiCategory? cat = null;
+        if (!string.IsNullOrWhiteSpace(CustomCategoryFilter) &&
+            !CustomCategoryFilter.StartsWith("(All", StringComparison.Ordinal) &&
+            Enum.TryParse<IndividualOptimizationUiCategory>(CustomCategoryFilter, true, out var parsedCat))
+        {
+            cat = parsedCat;
+        }
+
+        RiskLevel? risk = null;
+        if (!string.IsNullOrWhiteSpace(CustomRiskFilter) &&
+            !CustomRiskFilter.StartsWith("(All", StringComparison.Ordinal) &&
+            Enum.TryParse<RiskLevel>(CustomRiskFilter, true, out var parsedRisk))
+        {
+            risk = parsedRisk;
+        }
+
+        // Apply pending onto items for "only changed" filter
+        foreach (var item in _customCatalogItems)
+        {
+            item.PendingValue = _customPendingValues.TryGetValue(item.ConfigKey, out var p) ? p : item.PendingValue;
+        }
+
+        var filter = new IndividualOptimizationFilter
+        {
+            SearchText = CustomSearchText,
+            Category = cat,
+            Risk = risk,
+            OnlyChangedFromCurrent = CustomOnlyChanged,
+            OnlyDifferFromRecommended = CustomOnlyRecommendedDiff
+        };
+
+        var filtered = _individualCatalog.Filter(_customCatalogItems, filter);
+        CustomOptimizationRows.Clear();
+        foreach (var item in filtered)
+        {
+            var row = new CustomOptimizationRowViewModel(item, this)
+            {
+                IsSelected = _customSelectedKeys.Contains(item.ConfigKey)
+            };
+            if (_customPendingValues.TryGetValue(item.ConfigKey, out var pending))
+            {
+                row.SetPendingSilently(pending);
+            }
+            else if (!string.IsNullOrWhiteSpace(item.RecommendedValue))
+            {
+                // Default pending target = recommended when selected later; keep empty until selected
+                row.SetPendingSilently(item.PendingValue ?? string.Empty);
+            }
+
+            CustomOptimizationRows.Add(row);
+        }
+
+        RaisePropertyChanged(nameof(CustomSelectionSummary));
+    }
+
+    private async Task LoadCustomSetsAsync()
+    {
+        try
+        {
+            var list = await _customSetStore.ListAsync().ConfigureAwait(true);
+            CustomOptimizationSets.Clear();
+            foreach (var s in list)
+            {
+                CustomOptimizationSets.Add(s);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning($"Custom sets load failed: {ex.Message}");
+        }
+    }
+
+    private void ApplyRecommendedValuesToSelected()
+    {
+        foreach (var key in _customSelectedKeys.ToList())
+        {
+            var item = _customCatalogItems.FirstOrDefault(i =>
+                i.ConfigKey.Equals(key, StringComparison.OrdinalIgnoreCase));
+            if (item?.RecommendedValue is null)
+            {
+                continue;
+            }
+
+            _customPendingValues[key] = item.RecommendedValue;
+            item.PendingValue = item.RecommendedValue;
+        }
+
+        ApplyCustomFilter();
+        StatusMessage = "Applied recommended values to selection (not yet written to disk).";
+    }
+
+    private bool ConfirmHighRiskIfNeeded(IReadOnlyDictionary<string, string> map)
+    {
+        var high = new List<string>();
+        foreach (var key in map.Keys)
+        {
+            var item = _customCatalogItems.FirstOrDefault(i =>
+                i.ConfigKey.Equals(key, StringComparison.OrdinalIgnoreCase));
+            if (item?.Risk == RiskLevel.High)
+            {
+                high.Add(item.Name);
+            }
+        }
+
+        if (high.Count == 0)
+        {
+            return true;
+        }
+
+        var result = MessageBox.Show(
+            "This selection includes High-risk setting(s):\n\n• " +
+            string.Join("\n• ", high) +
+            "\n\nHigh-risk changes require explicit confirmation. Continue?",
+            "High-risk confirmation",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        return result == MessageBoxResult.Yes;
+    }
+
+    private async Task PreviewCustomSelectionAsync()
+    {
+        var map = BuildSelectedSettingsMap();
+        if (map.Count == 0)
+        {
+            StatusMessage = "Select at least one setting.";
+            return;
+        }
+
+        if (!ConfirmHighRiskIfNeeded(map))
+        {
+            StatusMessage = "Preview cancelled (high-risk not confirmed).";
+            return;
+        }
+
+        ErrorMessage = null;
+        StatusMessage = "Previewing custom selection…";
+        try
+        {
+            var run = await _guided.PreviewAsync(BuildCustomGuidedRequest(previewOnly: true)).ConfigureAwait(true);
+            LastGuidedRun = run;
+            if (run.PreviewDiff is not null)
+            {
+                PendingDiff = run.PreviewDiff;
+                PendingDiffSummary = run.PreviewDiff.HasChanges
+                    ? $"Custom preview: {run.PreviewDiff.ChangeCount} change(s) — no files written."
+                    : "Custom preview: already matches selection.";
+            }
+
+            StatusMessage = run.Error ?? "Custom preview complete (no modifications).";
+            if (!string.IsNullOrWhiteSpace(run.Error))
+            {
+                ErrorMessage = run.Error;
+            }
+
+            CurrentPage = "Custom";
+            await LoadGuidedHistoryAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            StatusMessage = "Custom preview failed.";
+        }
+        finally
+        {
+            RaiseCanExecutes();
+        }
+    }
+
+    private async Task StartGuidedCustomAsync()
+    {
+        var map = BuildSelectedSettingsMap();
+        if (map.Count == 0)
+        {
+            StatusMessage = "Select at least one setting.";
+            return;
+        }
+
+        if (!ConfirmHighRiskIfNeeded(map))
+        {
+            StatusMessage = "Guided run cancelled (high-risk not confirmed).";
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            $"Run guided benchmark for {map.Count} selected setting(s)?\n\n" +
+            "Baseline → Confirm → Backup → Apply → Post benchmark → Compare → Keep/Restore\n\n" +
+            "Uses the same guided service and CS2 settings apply path. No FPS guarantees.\n" +
+            "Recommended values ≠ measured results.",
+            "Guided custom optimization",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question,
+            MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            StatusMessage = "Guided custom run cancelled.";
+            return;
+        }
+
+        ErrorMessage = null;
+        GuidedProgressLines.Clear();
+        GuidedProgressPercent = 0;
+        CurrentPage = "Guided";
+        StatusMessage = "Guided custom optimization running…";
+
+        try
+        {
+            var run = await _guided.RunAsync(BuildCustomGuidedRequest(previewOnly: false)).ConfigureAwait(true);
+            LastGuidedRun = run;
+            if (!string.IsNullOrWhiteSpace(run.Error) && run.Status == GuidedOptimizationStatus.Failed)
+            {
+                ErrorMessage = run.Error;
+            }
+
+            StatusMessage = $"Guided custom finished: {run.Status} / {run.Classification} / {run.UserDecision}";
+            await LoadGuidedHistoryAsync().ConfigureAwait(true);
+            await LoadBenchmarkHistoryAsync().ConfigureAwait(true);
+            await RefreshCustomCatalogAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            StatusMessage = "Guided custom run failed.";
+            _log.LogError("Guided custom run failed.", ex);
+        }
+        finally
+        {
+            RaiseCanExecutes();
+        }
+    }
+
+    private async Task QuickTestSingleSettingAsync()
+    {
+        if (CustomSelectedCount != 1)
+        {
+            StatusMessage = "Quick test requires exactly one selected setting.";
+            return;
+        }
+
+        await StartGuidedCustomAsync().ConfigureAwait(true);
+    }
+
+    private async Task SaveCustomSetAsync()
+    {
+        var map = BuildSelectedSettingsMap();
+        if (map.Count == 0)
+        {
+            StatusMessage = "Nothing to save.";
+            return;
+        }
+
+        var name = NewCustomSetName?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = Prompt("Save custom set", "Name for this custom optimization set:", "My set");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                StatusMessage = "Save cancelled.";
+                return;
+            }
+        }
+
+        try
+        {
+            var set = new CustomOptimizationSet
+            {
+                Id = "set-" + Guid.NewGuid().ToString("N")[..10],
+                Name = name.Trim(),
+                Description = $"User selection of {map.Count} setting(s).",
+                Settings = map,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            await _customSetStore.SaveAsync(set).ConfigureAwait(true);
+            NewCustomSetName = string.Empty;
+            await LoadCustomSetsAsync().ConfigureAwait(true);
+            SelectedCustomSet = CustomOptimizationSets.FirstOrDefault(s => s.Id == set.Id);
+            StatusMessage = $"Saved custom set '{set.Name}'.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            StatusMessage = "Save custom set failed.";
+        }
+    }
+
+    private async Task SaveSelectionAsProfileAsync()
+    {
+        var map = BuildSelectedSettingsMap();
+        if (map.Count == 0)
+        {
+            StatusMessage = "Nothing to save.";
+            return;
+        }
+
+        var name = Prompt(
+            "Save as Profile",
+            "Creates a custom profile via the existing profile system:",
+            NewCustomSetName.Length > 0 ? NewCustomSetName : "Custom selection");
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            StatusMessage = "Save as profile cancelled.";
+            return;
+        }
+
+        try
+        {
+            var profile = new PerformanceProfile
+            {
+                Id = "custom-" + Guid.NewGuid().ToString("N")[..8],
+                Name = name.Trim(),
+                Description = $"Saved from custom optimization selection ({map.Count} setting(s)).",
+                IsCustom = true,
+                IsBuiltIn = false,
+                Settings = map,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            await _profileService.SaveCustomProfileAsync(profile).ConfigureAwait(true);
+            Profiles.Clear();
+            foreach (var p in await _profileService.GetProfilesAsync().ConfigureAwait(true))
+            {
+                Profiles.Add(p);
+            }
+
+            SelectedProfile = Profiles.FirstOrDefault(p => p.Id == profile.Id);
+            StatusMessage = $"Saved profile '{profile.Name}' via existing profile system.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            StatusMessage = "Save as profile failed.";
+        }
+    }
+
+    private async Task LoadSelectedCustomSetAsync()
+    {
+        if (SelectedCustomSet is null)
+        {
+            return;
+        }
+
+        _customSelectedKeys.Clear();
+        _customPendingValues.Clear();
+        foreach (var (k, v) in SelectedCustomSet.Settings)
+        {
+            _customSelectedKeys.Add(k);
+            _customPendingValues[k] = v;
+        }
+
+        ApplyCustomFilter();
+        NotifyCustomSelectionChanged();
+        StatusMessage = $"Loaded set '{SelectedCustomSet.Name}' ({SelectedCustomSet.SettingCount} setting(s)).";
+        await Task.CompletedTask.ConfigureAwait(true);
+    }
+
+    private async Task DeleteSelectedCustomSetAsync()
+    {
+        if (SelectedCustomSet is null)
+        {
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            $"Delete custom set '{SelectedCustomSet.Name}'?",
+            "Delete set",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            await _customSetStore.DeleteAsync(SelectedCustomSet.Id).ConfigureAwait(true);
+            SelectedCustomSet = null;
+            await LoadCustomSetsAsync().ConfigureAwait(true);
+            StatusMessage = "Custom set deleted.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+
+    private async Task DuplicateSelectedCustomSetAsync()
+    {
+        if (SelectedCustomSet is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var copy = await _customSetStore.DuplicateAsync(SelectedCustomSet.Id).ConfigureAwait(true);
+            await LoadCustomSetsAsync().ConfigureAwait(true);
+            SelectedCustomSet = CustomOptimizationSets.FirstOrDefault(s => s.Id == copy.Id);
+            StatusMessage = $"Duplicated set as '{copy.Name}'.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+
+    private async Task RenameSelectedCustomSetAsync()
+    {
+        if (SelectedCustomSet is null)
+        {
+            return;
+        }
+
+        var name = Prompt("Rename set", "New name:", SelectedCustomSet.Name);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        try
+        {
+            await _customSetStore.RenameAsync(SelectedCustomSet.Id, name.Trim()).ConfigureAwait(true);
+            await LoadCustomSetsAsync().ConfigureAwait(true);
+            SelectedCustomSet = CustomOptimizationSets.FirstOrDefault(s =>
+                s.Name.Equals(name.Trim(), StringComparison.OrdinalIgnoreCase));
+            StatusMessage = "Custom set renamed.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+
+    private async Task ResetSelectedViaBackupAsync()
+    {
+        var confirm = MessageBox.Show(
+            CustomResetExplanation + "\n\nRestore the last FrameForge settings backup now?",
+            "Reset via backup",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            StatusMessage = "Reset cancelled.";
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            var result = await _cs2SettingsService.RestoreLastFrameForgeChangesAsync().ConfigureAwait(true);
+            StatusMessage = result.Success ? result.Message : ("Reset failed: " + result.Message);
+            if (!result.Success)
+            {
+                ErrorMessage = result.Message;
+            }
+
+            await LoadCs2SettingsAsync().ConfigureAwait(true);
+            await RefreshCustomCatalogAsync().ConfigureAwait(true);
+            await RefreshAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            StatusMessage = "Reset failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     private async Task LoadGuidedHistoryAsync()
     {
         try
@@ -1644,6 +2400,12 @@ public sealed class MainViewModel : ViewModelBase
 
     private GuidedOptimizationRequest BuildGuidedRequest(bool previewOnly)
     {
+        // Prefer explicit custom selection when present (Phase 6).
+        if (HasCustomSelection)
+        {
+            return BuildCustomGuidedRequest(previewOnly);
+        }
+
         return new GuidedOptimizationRequest
         {
             TargetKind = GuidedTargetKind.Profile,
@@ -1663,11 +2425,61 @@ public sealed class MainViewModel : ViewModelBase
         };
     }
 
+    private GuidedOptimizationRequest BuildCustomGuidedRequest(bool previewOnly, string? labelOverride = null)
+    {
+        var map = BuildSelectedSettingsMap();
+        return new GuidedOptimizationRequest
+        {
+            TargetKind = GuidedTargetKind.SettingsMap,
+            DesiredSettings = map,
+            PreviewOnly = previewOnly,
+            RequireCs2ProcessForBenchmark = !previewOnly,
+            BenchmarkConfiguration = new BenchmarkConfiguration
+            {
+                DurationSeconds = BenchmarkDurationSeconds,
+                SampleIntervalMs = BenchmarkSampleIntervalMs,
+                WarmupSeconds = BenchmarkWarmupSeconds,
+                ProfileId = SelectedCustomSet?.Id,
+                ProfileName = SelectedCustomSet?.Name
+            },
+            Label = labelOverride
+                ?? (map.Count == 1 ? map.Keys.First() : $"{map.Count} custom setting(s)"),
+            CustomSetId = SelectedCustomSet?.Id,
+            CustomSetName = SelectedCustomSet?.Name
+        };
+    }
+
+    private Dictionary<string, string> BuildSelectedSettingsMap()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in _customSelectedKeys)
+        {
+            var item = _customCatalogItems.FirstOrDefault(i =>
+                i.ConfigKey.Equals(key, StringComparison.OrdinalIgnoreCase));
+            if (item is null)
+            {
+                continue;
+            }
+
+            var value = _customPendingValues.TryGetValue(key, out var pending) && !string.IsNullOrWhiteSpace(pending)
+                ? pending.Trim()
+                : item.EffectiveTargetValue;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            map[item.ConfigKey] = value;
+        }
+
+        return map;
+    }
+
     private async Task PreviewGuidedAsync()
     {
-        if (SelectedProfile is null)
+        if (!HasCustomSelection && SelectedProfile is null)
         {
-            StatusMessage = "Select a profile first.";
+            StatusMessage = "Select a profile or custom settings first.";
             return;
         }
 
@@ -1707,20 +2519,24 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task StartGuidedAsync()
     {
-        if (SelectedProfile is null)
+        if (!HasCustomSelection && SelectedProfile is null)
         {
-            StatusMessage = "Select a profile first.";
+            StatusMessage = "Select a profile or custom settings first.";
             return;
         }
 
+        var target = HasCustomSelection
+            ? $"{CustomSelectedCount} custom setting(s)"
+            : $"profile '{SelectedProfile!.Name}'";
+
         var confirm = MessageBox.Show(
-            "Start guided optimization?\n\n" +
+            "Start guided optimization for " + target + "?\n\n" +
             "1) Baseline benchmark (CS2 should be running)\n" +
             "2) Preview diff — you must confirm before apply\n" +
-            "3) Backup + apply profile settings\n" +
+            "3) Backup + apply settings (existing CS2 settings path only)\n" +
             "4) Post benchmark + compare\n" +
             "5) Keep or Restore\n\n" +
-            "FrameForge does not guarantee FPS improvements. Close extra apps for repeatability.",
+            "Recommended values are not measured gains. FrameForge does not guarantee FPS improvements.",
             "Guided Optimization",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question,
@@ -2003,6 +2819,79 @@ public sealed class MainViewModel : ViewModelBase
         box.SelectAll();
         return window.ShowDialog() == true ? result : null;
     }
+}
+
+
+public sealed class CustomOptimizationRowViewModel : ViewModelBase
+{
+    private readonly MainViewModel _owner;
+    private bool _isSelected;
+    private string _pendingValue = string.Empty;
+
+    public CustomOptimizationRowViewModel(IndividualOptimizationItem item, MainViewModel owner)
+    {
+        _owner = owner;
+        Item = item;
+        _pendingValue = item.PendingValue
+            ?? item.RecommendedValue
+            ?? item.CurrentValue
+            ?? string.Empty;
+    }
+
+    public IndividualOptimizationItem Item { get; }
+    public string Id => Item.Id;
+    public string ConfigKey => Item.ConfigKey;
+    public string Name => Item.Name;
+    public string Description => Item.Description;
+    public string CategoryLabel => Item.CategoryLabel;
+    public string? CurrentValue => Item.CurrentValue;
+    public string? RecommendedValue => Item.RecommendedValue;
+    public string RiskLabel => Item.RiskLabel;
+    public string ExpectedImpactLabel => Item.ExpectedImpactLabel;
+    public string ExpectedImpactDescription => Item.ExpectedImpactDescription;
+    public bool RequiresRestart => Item.RequiresRestart;
+    public bool Supported => Item.Supported;
+
+    public string PendingValue
+    {
+        get => _pendingValue;
+        set
+        {
+            if (SetProperty(ref _pendingValue, value ?? string.Empty))
+            {
+                _owner.NotifyCustomPendingValueChanged(ConfigKey, _pendingValue);
+                RaisePropertyChanged(nameof(IsChangedFromCurrent));
+            }
+        }
+    }
+
+    public void SetPendingSilently(string? value)
+    {
+        _pendingValue = value ?? string.Empty;
+        RaisePropertyChanged(nameof(PendingValue));
+        RaisePropertyChanged(nameof(IsChangedFromCurrent));
+    }
+
+    public bool IsChangedFromCurrent =>
+        !string.Equals(
+            (CurrentValue ?? string.Empty).Trim(),
+            (_pendingValue ?? string.Empty).Trim(),
+            StringComparison.OrdinalIgnoreCase);
+
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set
+        {
+            if (SetProperty(ref _isSelected, value))
+            {
+                _owner.SetCustomRowSelected(ConfigKey, value);
+            }
+        }
+    }
+
+    public string DistinctionHint =>
+        $"Recommended: {RecommendedValue ?? "—"}  ·  Current: {CurrentValue ?? "—"}  ·  Target: {PendingValue}  ·  Impact: {ExpectedImpactLabel} (not measured)";
 }
 
 public sealed class SettingRowViewModel : ViewModelBase

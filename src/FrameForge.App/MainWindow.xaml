@@ -43,6 +43,7 @@
           <Button Content="Backups" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Backups" />
           <Button Content="Benchmark" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Benchmark" />
           <Button Content="Optimize &amp; Benchmark" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Guided" />
+          <Button Content="Custom Optimization" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Custom" />
           <Button Content="Settings" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Settings" />
         </StackPanel>
       </DockPanel>
@@ -605,7 +606,7 @@
           <StackPanel>
             <TextBlock Text="Optimize &amp; Benchmark" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,8" />
             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,12"
-                       Text="Guided flow: baseline benchmark → preview → your confirmation → backup → apply profile settings → verify → post benchmark → compare → keep or restore. No FPS guarantees. No injection. CS2 should already be running for benchmarks." />
+                       Text="Guided flow: baseline benchmark → preview → your confirmation → backup → apply (profile or custom selection) → verify → post benchmark → compare → keep or restore. No FPS guarantees. Custom selections come from the Custom Optimization page. CS2 should already be running for benchmarks." />
 
             <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
               <StackPanel>
@@ -716,6 +717,140 @@
                     </DataTemplate>
                   </ListBox.ItemTemplate>
                 </ListBox>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- Custom Optimization (Phase 6) -->
+        <ScrollViewer Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Custom}">
+          <StackPanel>
+            <TextBlock Text="Custom Optimization" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,12"
+                       Text="Select individual CS2 settings or a custom combination. Recommended values are configuration suggestions — not measured performance gains. Apply uses the same validation → diff → backup → apply → verify path. Guided test reuses Phase 5 orchestration." />
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Search &amp; filter (in-memory)</TextBlock>
+                <Grid Margin="0,0,0,8">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <TextBox Grid.Column="0" Text="{Binding CustomSearchText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" Padding="6" />
+                  <ComboBox Grid.Column="1" ItemsSource="{Binding CustomCategoryFilterOptions}" SelectedItem="{Binding CustomCategoryFilter}" Margin="0,0,8,0" />
+                  <ComboBox Grid.Column="2" ItemsSource="{Binding CustomRiskFilterOptions}" SelectedItem="{Binding CustomRiskFilter}" />
+                </Grid>
+                <WrapPanel Margin="0,0,0,8">
+                  <CheckBox Content="Only changed from current" IsChecked="{Binding CustomOnlyChanged}" Margin="0,0,16,4" VerticalAlignment="Center" />
+                  <CheckBox Content="Only differ from recommended" IsChecked="{Binding CustomOnlyRecommendedDiff}" Margin="0,0,16,4" VerticalAlignment="Center" />
+                  <Button Content="Refresh catalog" Style="{StaticResource NavButtonStyle}" Command="{Binding RefreshCustomCatalogCommand}" Margin="0,0,8,4" Padding="8,4" />
+                  <Button Content="Select visible" Style="{StaticResource NavButtonStyle}" Command="{Binding SelectAllVisibleCustomCommand}" Margin="0,0,8,4" Padding="8,4" />
+                  <Button Content="Clear selection" Style="{StaticResource NavButtonStyle}" Command="{Binding ClearCustomSelectionCommand}" Margin="0,0,8,4" Padding="8,4" />
+                  <Button Content="Use recommended values" Style="{StaticResource NavButtonStyle}" Command="{Binding ApplyRecommendedToSelectionCommand}" Margin="0,0,8,4" Padding="8,4" />
+                </WrapPanel>
+                <TextBlock Text="{Binding CustomSelectionSummary}" FontWeight="SemiBold" />
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Catalog</TextBlock>
+                <ItemsControl ItemsSource="{Binding CustomOptimizationRows}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,8" Padding="10">
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="140" />
+                          </Grid.ColumnDefinitions>
+                          <CheckBox Grid.Column="0" IsChecked="{Binding IsSelected}" VerticalAlignment="Top" Margin="0,4,10,0" />
+                          <StackPanel Grid.Column="1">
+                            <TextBlock FontWeight="SemiBold">
+                              <Run Text="{Binding Name}" />
+                              <Run Text=" (" Foreground="{StaticResource TextSecondaryBrush}" />
+                              <Run Text="{Binding ConfigKey}" Foreground="{StaticResource TextSecondaryBrush}" />
+                              <Run Text=")" Foreground="{StaticResource TextSecondaryBrush}" />
+                            </TextBlock>
+                            <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,2,0,4" />
+                            <TextBlock FontSize="12" Margin="0,0,0,2">
+                              <Run Text="Category:" />
+                              <Run Text="{Binding CategoryLabel}" />
+                              <Run Text=" · Risk:" />
+                              <Run Text="{Binding RiskLabel}" />
+                              <Run Text=" · Expected impact:" />
+                              <Run Text="{Binding ExpectedImpactLabel}" />
+                              <Run Text=" (qualitative)" />
+                            </TextBlock>
+                            <TextBlock Text="{Binding ExpectedImpactDescription}" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                            <TextBlock FontSize="12">
+                              <Run Text="Current:" FontWeight="SemiBold" />
+                              <Run Text="{Binding CurrentValue}" />
+                              <Run Text="   Recommended:" FontWeight="SemiBold" />
+                              <Run Text="{Binding RecommendedValue}" />
+                            </TextBlock>
+                            <DockPanel Margin="0,6,0,0">
+                              <TextBlock Text="Target value:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                              <TextBox Text="{Binding PendingValue, UpdateSourceTrigger=PropertyChanged}" Padding="4" MinWidth="120" />
+                            </DockPanel>
+                            <TextBlock Text="{Binding DistinctionHint}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                          </StackPanel>
+                          <StackPanel Grid.Column="2" Margin="8,0,0,0">
+                            <TextBlock Text="Measured result:" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" />
+                            <TextBlock Text="— run guided test" FontSize="12" TextWrapping="Wrap" />
+                          </StackPanel>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Actions</TextBlock>
+                <WrapPanel>
+                  <Button Content="Preview selection" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding PreviewCustomSelectionCommand}" Margin="0,0,8,8" />
+                  <Button Content="Guided test selection" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding GuidedCustomSelectionCommand}" Margin="0,0,8,8" />
+                  <Button Content="Quick test (1 setting)" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding QuickTestSingleSettingCommand}" Margin="0,0,8,8" />
+                  <Button Content="Reset via backup" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ResetSelectedSettingViaBackupCommand}" Margin="0,0,8,8" />
+                </WrapPanel>
+                <TextBlock Text="{Binding CustomResetExplanation}" TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" />
+                <DockPanel Margin="0,0,0,8">
+                  <TextBlock Text="Set name:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                  <Button DockPanel.Dock="Right" Content="Save selection as set" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveCustomSetCommand}" Margin="8,0,0,0" />
+                  <Button DockPanel.Dock="Right" Content="Save as Profile" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveSelectionAsProfileCommand}" Margin="8,0,0,0" />
+                  <TextBox Text="{Binding NewCustomSetName, UpdateSourceTrigger=PropertyChanged}" Padding="6" />
+                </DockPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Saved custom sets (not profiles)</TextBlock>
+                <ListBox ItemsSource="{Binding CustomOptimizationSets}" SelectedItem="{Binding SelectedCustomSet}"
+                         Background="Transparent" BorderThickness="0" MaxHeight="180" Margin="0,0,0,8">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,6" Padding="10">
+                        <StackPanel>
+                          <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" />
+                          <TextBlock Text="{Binding Description}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" TextWrapping="Wrap" />
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+                <WrapPanel>
+                  <Button Content="Load set" Style="{StaticResource NavButtonStyle}" Command="{Binding LoadCustomSetCommand}" Margin="0,0,8,4" Padding="8,4" />
+                  <Button Content="Duplicate" Style="{StaticResource NavButtonStyle}" Command="{Binding DuplicateCustomSetCommand}" Margin="0,0,8,4" Padding="8,4" />
+                  <Button Content="Rename" Style="{StaticResource NavButtonStyle}" Command="{Binding RenameCustomSetCommand}" Margin="0,0,8,4" Padding="8,4" />
+                  <Button Content="Delete" Style="{StaticResource NavButtonStyle}" Command="{Binding DeleteCustomSetCommand}" Margin="0,0,8,4" Padding="8,4" />
+                </WrapPanel>
               </StackPanel>
             </Border>
           </StackPanel>

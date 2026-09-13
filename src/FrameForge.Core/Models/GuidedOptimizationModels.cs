@@ -81,6 +81,11 @@ public sealed class GuidedOptimizationRequest
     public bool RequireCs2ProcessForBenchmark { get; init; } = true;
 
     public string? Label { get; init; }
+
+    /// <summary>Optional link to a saved custom optimization set.</summary>
+    public string? CustomSetId { get; init; }
+
+    public string? CustomSetName { get; init; }
 }
 
 public sealed class GuidedOptimizationProgress
@@ -126,6 +131,17 @@ public sealed class GuidedOptimizationRun
     public string? ProfileName { get; set; }
     public string? OptimizationLabel { get; set; }
 
+    /// <summary>Optional custom optimization set id (Phase 6).</summary>
+    public string? CustomSetId { get; set; }
+
+    public string? CustomSetName { get; set; }
+
+    /// <summary>Config keys explicitly selected for this run (settings map / single / multi).</summary>
+    public List<string> SelectedSettingKeys { get; set; } = new();
+
+    /// <summary>Snapshot of desired key→value at start of run.</summary>
+    public Dictionary<string, string> SelectedSettings { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     public string? InitialBenchmarkId { get; set; }
     public string? PostBenchmarkId { get; set; }
     public string? BackupId { get; set; }
@@ -152,7 +168,9 @@ public sealed class GuidedOptimizationRun
 
 public static class GuidedOptimizationSchema
 {
-    public const int CurrentVersion = 1;
+    /// <summary>v1 = Phase 5; v2 adds SelectedSettings / CustomSet fields (backward compatible).</summary>
+    public const int CurrentVersion = 2;
+    public const int MinReadableVersion = 1;
     public const string FileExtension = ".json";
 }
 

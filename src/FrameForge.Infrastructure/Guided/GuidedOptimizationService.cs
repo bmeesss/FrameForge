@@ -103,6 +103,7 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
             }
 
             var desired = await ResolveDesiredAsync(request, cancellationToken).ConfigureAwait(false);
+            StampSelectedSettings(run, desired);
             var validation = _settings.ValidateSettings(desired);
             if (!validation.IsValid)
             {
@@ -252,6 +253,7 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
             }
 
             var desired = await ResolveDesiredAsync(request, linked.Token).ConfigureAwait(false);
+            StampSelectedSettings(run, desired);
             if (desired.Count == 0)
             {
                 Fail(run, "No settings selected to apply. Choose a profile or explicit settings.");
@@ -572,17 +574,38 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
         return new Dictionary<string, string>(profile?.Settings ?? new(), StringComparer.OrdinalIgnoreCase);
     }
 
-    private static GuidedOptimizationRun CreateRunShell(GuidedOptimizationRequest request) => new()
+
+    private static void StampSelectedSettings(GuidedOptimizationRun run, IReadOnlyDictionary<string, string> desired)
     {
-        Id = GuidedOptimizationStore.CreateId(DateTimeOffset.Now),
-        StartedAt = DateTimeOffset.UtcNow,
-        Status = GuidedOptimizationStatus.Preparing,
-        ProfileId = request.ProfileId,
-        ProfileName = request.ProfileName,
-        OptimizationLabel = request.Label,
-        BenchmarkConfiguration = request.BenchmarkConfiguration,
-        PreviewOnly = request.PreviewOnly
-    };
+        run.SelectedSettings = new Dictionary<string, string>(desired, StringComparer.OrdinalIgnoreCase);
+        run.SelectedSettingKeys = desired.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList();
+        if (string.IsNullOrWhiteSpace(run.OptimizationLabel))
+        {
+            run.OptimizationLabel = desired.Count == 1
+                ? desired.Keys.First()
+                : $"{desired.Count} setting(s)";
+        }
+    }
+
+    private static GuidedOptimizationRun CreateRunShell(GuidedOptimizationRequest request)
+    {
+        var selected = new Dictionary<string, string>(request.DesiredSettings, StringComparer.OrdinalIgnoreCase);
+        return new GuidedOptimizationRun
+        {
+            Id = GuidedOptimizationStore.CreateId(DateTimeOffset.Now),
+            StartedAt = DateTimeOffset.UtcNow,
+            Status = GuidedOptimizationStatus.Preparing,
+            ProfileId = request.ProfileId,
+            ProfileName = request.ProfileName,
+            OptimizationLabel = request.Label,
+            CustomSetId = request.CustomSetId,
+            CustomSetName = request.CustomSetName,
+            SelectedSettingKeys = selected.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList(),
+            SelectedSettings = selected,
+            BenchmarkConfiguration = request.BenchmarkConfiguration,
+            PreviewOnly = request.PreviewOnly
+        };
+    }
 
     private void SetCurrent(GuidedOptimizationRun run)
     {

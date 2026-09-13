@@ -53,6 +53,19 @@ public sealed class GuidedOptimizationStore : IGuidedOptimizationStore
                     continue;
                 }
 
+                if (run.SchemaVersion < GuidedOptimizationSchema.MinReadableVersion)
+                {
+                    run.SchemaVersion = GuidedOptimizationSchema.MinReadableVersion;
+                }
+
+                // v1 → v2: ensure selection collections exist
+                run.SelectedSettingKeys ??= new List<string>();
+                run.SelectedSettings ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (run.SchemaVersion < GuidedOptimizationSchema.CurrentVersion)
+                {
+                    run.SchemaVersion = GuidedOptimizationSchema.CurrentVersion;
+                }
+
                 run.FilePath = file;
                 list.Add(run);
             }

@@ -22,8 +22,9 @@ It analyzes your PC and CS2 installation, recommends **safe** optimizations, man
 - **Backups** — file snapshots + metadata; restore returns exact previous bytes; files created by an apply are deleted on restore.
 - **Benchmark engine** — external OS-level session to compare system states (before/after). CPU, process CPU/memory, system memory; GPU util/temps and CS2 frame-time marked unavailable without injection. Local JSON history, A/B comparison, JSON/CSV export. **Does not guarantee FPS improvements.**
 - **Guided Optimize & Benchmark** — orchestrated baseline → preview → **explicit confirm** → backup → apply → verify → post-benchmark → compare → Keep|Restore. Uses the same settings apply path only. Local guided-run history. **No FPS guarantees.**
+- **Custom / individual optimization** — pick single or multiple supported CS2 settings (or a full profile). In-memory search/filter, custom sets, save-as-profile via existing profile system, guided A/B through Phase 5 service. **Recommended ≠ measured.**
 - **Logging** — structured local logs; secrets redacted.
-- **UI** — dark WPF shell with loading/empty/error states and confirmation dialogs. Execution status warning when the managed cfg is not wired into autoexec. Benchmark page with live sample timeline. Optimize & Benchmark page with step progress and Keep/Restore.
+- **UI** — dark WPF shell with loading/empty/error states and confirmation dialogs. Execution status warning when the managed cfg is not wired into autoexec. Benchmark page with live sample timeline. Optimize & Benchmark page with step progress and Keep/Restore. Custom Optimization picker page.
 
 ## How FrameForge modifies CS2 configuration
 
@@ -257,6 +258,60 @@ Corrupt history files are skipped; valid runs still list.
 
 **Full restore:** same as full keep through comparison → *Restore Previous* → cfg returned to pre-apply backup; baseline/post benchmark JSON remain in history.
 
+## Custom / individual optimization selection
+
+Users are not forced to apply an entire profile. Three supported targets all use the **same** pipeline:
+
+Validation → Diff → Backup → Apply → Verify → (optional Guided) Benchmark → Compare → Keep/Restore
+
+| Target | How |
+|--------|-----|
+| **Single setting** | Check one row on Custom Optimization → Preview or Quick test |
+| **Multiple settings** | Multi-select → temporary set → Preview / Guided test |
+| **Full profile** | Profiles page or Guided page (unchanged) |
+
+There is **no second configuration-writing path** — apply always goes through `ICs2SettingsService`.
+
+### Catalog
+
+Built from supported `Cs2SettingDefinition` entries only. Each item exposes: Id, Name, Category, Description, CurrentValue, RecommendedValue, Risk (Low/Medium/High), ExpectedImpact (Low/Medium/High/Unknown + qualitative description), Supported, RequiresRestart.
+
+- **Expected impact** = intended relevance, **not** a guaranteed FPS increase.  
+- **Never** shown as “+10 FPS” / “FPS boost guaranteed”.  
+- **Measured results** come only from the benchmark / guided comparison UI.
+
+UI categories: Performance, HUD, Mouse, Audio, Communication, Gameplay (mapped from existing CS2 setting categories).
+
+### Picker UX
+
+- Search by name / config key (in-memory; no disk I/O while typing)  
+- Filter by category, risk, “only changed”, “only differ from recommended”  
+- Nothing selected by default  
+- High-risk items require explicit confirmation before preview/apply  
+- Clear distinction: **Recommended** vs **Current** vs **Target** vs **Measured result**
+
+### Custom optimization sets
+
+`CustomOptimizationSet` (Id, Name, Description, Settings, CreatedAt, UpdatedAt) is stored under:
+
+```text
+%LocalAppData%/FrameForge/CustomOptimizationSets/<id>.json
+```
+
+Separate from built-in/custom **profiles**. CRUD: create, rename, duplicate, edit (re-save selection), delete. Validation rejects unknown keys, unsupported settings, invalid values, malformed JSON, and future schema versions. Import never executes data.
+
+### Save as Profile
+
+Selected settings → **Save as Profile** calls existing `IProfileService.SaveCustomProfileAsync`. No duplicated profile persistence.
+
+### Guided integration
+
+Custom selection → `GuidedTargetKind.SettingsMap` on existing `IGuidedOptimizationService`. Guided history (schema v2) records selected keys/values, optional custom set id/name, baseline/post benchmarks, decision, classification. v1 history files still load.
+
+### Reset
+
+“Reset via backup” uses the existing FrameForge backup restore for managed cfg + autoexec. It is **not** a guaranteed single-key surgical restore; the UI states this honestly.
+
 ## Not implemented yet (honest)
 
 - Automatic Windows power-plan / registry tweaks (advisory only)
@@ -267,8 +322,9 @@ Corrupt history files are skipped; valid runs still list.
 - GPU utilization via documented counters without vendor lock-in
 - **Automatic** Steam launch-option editing (manual recommendation only)
 - Binary / `video.txt` graphics quality sliders
-- Multi-setting picker UI beyond profile / map targets (API supports maps; UI uses active profile)
 - Continuous / scheduled guided runs
+- True per-key surgical restore without full managed-cfg backup snapshot
+- In-game overlay for live recommended vs measured comparison
 
 ## Tech stack
 
@@ -288,7 +344,7 @@ src/
   FrameForge.CS2              Steam / CS2 detect + cfg + settings + autoexec integration
   FrameForge.Optimization     Catalog, pipeline, score
   FrameForge.Benchmark        External benchmark engine + OS sampler
-  FrameForge.Infrastructure   DI, backup, profiles, logs, guided optimization
+  FrameForge.Infrastructure   DI, backup, profiles, logs, guided optimization, custom sets
 tests/
   FrameForge.Tests
 assets/profiles/              Built-in profile JSON (schema v1)
