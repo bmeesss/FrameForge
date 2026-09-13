@@ -541,7 +541,6 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
         }
 
         var proc = _processMonitor.TryGetCs2Process();
-        var (powerPlan, powerStatus) = TryDetectPowerPlan();
 
         return new BenchmarkSystemSnapshot
         {
@@ -549,13 +548,15 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
             CpuCoreCount = hw.CpuCoreCount,
             CpuThreadCount = hw.CpuThreadCount,
             GpuName = hw.GpuName,
+            GpuDetectionNotes = hw.GpuDetectionNotes,
             TotalRamBytes = hw.TotalRamBytes,
             OsVersion = hw.WindowsVersion,
             Architecture = hw.Architecture,
-            PowerPlan = powerPlan,
-            PowerPlanStatus = powerStatus,
-            DisplayRefreshRateHz = null, // requires Win32 display APIs — left unavailable honestly
-            DisplayResolution = null,
+            PowerPlan = hw.PowerPlanName,
+            PowerPlanStatus = hw.PowerPlanStatus,
+            DisplayRefreshRateHz = hw.DisplayRefreshRateHz,
+            DisplayResolution = hw.DisplayResolution,
+            GameModeEnabled = hw.GameModeEnabled,
             Cs2InstallPath = installPath,
             Cs2VersionHint = versionHint,
             Cs2ProcessRunningAtStart = proc is not null,
@@ -566,17 +567,6 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
             ActiveFrameForgeSettings = settingsMap,
             CapturedAt = DateTimeOffset.UtcNow
         };
-    }
-
-    private static (string? plan, string? status) TryDetectPowerPlan()
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            return (null, "Power plan detection is Windows-oriented; not available on this OS.");
-        }
-
-        // Avoid shelling out aggressively; report honest unavailable without powercfg dependency.
-        return (null, "Power plan not queried in this build (safe default — no automatic powercfg).");
     }
 
     private static BenchmarkResult CloneResultWithNote(BenchmarkResult r, string extraNote) => new()

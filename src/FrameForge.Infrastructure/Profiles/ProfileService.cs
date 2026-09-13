@@ -366,7 +366,7 @@ public sealed class ProfileService : IProfileService
             {
                 try
                 {
-                    File.WriteAllText(path, FrameForgeJson.Serialize(profile));
+                    FrameForgeJson.SerializeFileAsync(path, profile).GetAwaiter().GetResult();
                 }
                 catch (Exception ex)
                 {

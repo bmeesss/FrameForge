@@ -144,16 +144,61 @@ public sealed class BenchmarkCalculator : IBenchmarkCalculator
                 "Only valid when frame-time samples exist. Not a guaranteed improvement."));
         }
 
+        // Stamp interpretation on each metric (Unavailable never becomes 0)
+        for (var i = 0; i < metrics.Count; i++)
+        {
+            var row = BenchmarkComparisonPresenter.ToDisplayRow(metrics[i]);
+            metrics[i] = new BenchmarkComparisonMetric
+            {
+                Metric = metrics[i].Metric,
+                Unit = metrics[i].Unit,
+                Before = metrics[i].IsAvailable ? metrics[i].Before : null,
+                After = metrics[i].IsAvailable ? metrics[i].After : null,
+                Difference = metrics[i].IsAvailable ? metrics[i].Difference : null,
+                PercentDifference = metrics[i].IsAvailable ? metrics[i].PercentDifference : null,
+                IsAvailable = metrics[i].IsAvailable,
+                Notes = metrics[i].Notes,
+                Interpretation = row.Interpretation
+            };
+            if (!metrics[i].IsAvailable)
+            {
+                // Explicit: never leave zeros that look like measurements
+                metrics[i] = new BenchmarkComparisonMetric
+                {
+                    Metric = metrics[i].Metric,
+                    Unit = metrics[i].Unit,
+                    Before = null,
+                    After = null,
+                    Difference = null,
+                    PercentDifference = null,
+                    IsAvailable = false,
+                    Notes = metrics[i].Notes ?? "Unavailable",
+                    Interpretation = "Unavailable"
+                };
+            }
+        }
+
+        var warnings = BenchmarkComparisonPresenter.AnalyzeConditions(
+            before,
+            after,
+            before.SystemInformation.SystemFingerprintId,
+            after.SystemInformation.SystemFingerprintId).ToList();
+
         var available = metrics.Where(m => m.IsAvailable).ToList();
         var summary = available.Count == 0
             ? "No overlapping available metrics to compare."
             : $"Compared {available.Count} metric(s). FrameForge does not guarantee FPS improvements.";
+        if (warnings.Count > 0)
+        {
+            summary += " Benchmark conditions differ — see warnings.";
+        }
 
         return new BenchmarkComparison
         {
             RunA = before,
             RunB = after,
             Metrics = metrics,
+            ConditionWarnings = warnings,
             Summary = summary
         };
     }

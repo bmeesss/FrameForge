@@ -51,7 +51,9 @@ public static class ServiceRegistration
         services.AddSingleton<ISystemFingerprintService, SystemFingerprintService>();
         services.AddSingleton<ISettingChangeSnapshotStore, SettingChangeSnapshotStore>();
         services.AddSingleton<IPerformanceIntelligenceService, PerformanceIntelligenceService>();
-        services.AddSingleton<IManagedConfigWatcher, ManagedConfigWatcher>();
+        services.AddSingleton<ManagedConfigWatcher>();
+        services.AddSingleton<IManagedConfigWatcher>(sp => sp.GetRequiredService<ManagedConfigWatcher>());
+        services.AddSingleton<IManagedConfigBaselineSink>(sp => sp.GetRequiredService<ManagedConfigWatcher>());
         services.AddSingleton<ITargetedRestoreService, TargetedRestoreService>();
         services.AddSingleton<ITargetedRestoreEvaluator, TargetedRestoreEvaluator>();
         services.AddSingleton<IIntelligenceExportService, IntelligenceExportService>();

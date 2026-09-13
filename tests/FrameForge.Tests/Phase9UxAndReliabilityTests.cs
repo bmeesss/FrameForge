@@ -192,7 +192,7 @@ public sealed class Phase9UxAndReliabilityTests
             var backups = new BackupService(paths, log);
             var snaps = new SettingChangeSnapshotStore(paths, log);
             var settings = new Cs2SettingsService(catalog, config, det, backups, appSettings, log, snaps);
-            var watcher = new ManagedConfigWatcher(det, settings, paths, log);
+            var watcher = new ManagedConfigWatcher(det, paths, log);
             await watcher.CaptureBaselineAsync();
 
             await snaps.AppendAsync(new[]
@@ -705,7 +705,7 @@ public sealed class Phase9UxAndReliabilityTests
             var appSettings = new AppSettingsService(paths, log);
             var backups = new BackupService(paths, log);
             var settings = new Cs2SettingsService(catalog, config, det, backups, appSettings, log);
-            var watcher = new ManagedConfigWatcher(det, settings, paths, log);
+            var watcher = new ManagedConfigWatcher(det, paths, log);
             return new WatchEnv(root, managed, autoexec, watcher);
         }
 

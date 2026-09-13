@@ -31,8 +31,14 @@ It analyzes your PC and CS2 installation, recommends **safe** optimizations, man
 - **Intelligence export/import** — `.frameforge-intelligence.json` and `.frameforge-snapshots.json`; no PII; validate + preview (default) then merge or import-as-new; imported fingerprints stay labeled Different system — never silently merged into the current machine.
 - **External cfg detection** — lightweight watcher on `frameforge_settings.cfg` and the autoexec FRAMEFORGE section only; hashes managed content; user lines outside markers do not invalidate restore safety.
 - **History reliability** — AtomicFile for history writes; corrupt JSON quarantined (not silent delete); intelligence index rebuilds from guided run files when needed.
+- **Windows WPF polish (Phase 10)** — keyboard focus visuals, AutomationProperties names/help text on primary actions, tooltips, error banner not color-only, destructive actions (restore/delete/import merge) require confirmation with **Cancel** as the safest default.
+- **Benchmark comparison UX** — side-by-side Metric | Before | After | Delta | Interpretation. Unavailable metrics show **Unavailable** (never zero). Condition warnings for CPU/GPU/RAM/OS/profile/duration/interval/warm-up/CS2/fingerprint/display/power when metadata differs — warnings do not block compare.
+- **System metadata (Windows)** — GPU adapter name via `EnumDisplayDevices`, display resolution/refresh via `EnumDisplaySettings`, Game Mode (read-only registry when present), power plan name via read-only `powercfg /getactivescheme`. GPU **utilization** remains unavailable without unsafe hooks. Values are null when not reliably obtainable.
+- **Apply baseline + snapshots** — every successful `ApplyDiffAsync` records per-key snapshots and refreshes the managed-file hash baseline; self-writes are suppressed so the watcher does not false-invalidate FrameForge applies.
+- **Import preview UI** — dedicated Performance History panel (files/records/evidence/fingerprints/conflicts); validation-only until Confirm merge / Import as new; Cancel is default.
+- **Performance History filters** — Current / Other / All systems, setting text, classification, confidence; sort by Latest / Most tested / Best / Worst. Setting detail shows live current, recommended, last measured, confidence, restore state, retest/restore. Filters operate on the cached index only (no re-benchmark on open).
 - **Logging** — structured local logs; secrets redacted.
-- **UI** — dark WPF shell with loading/empty/error states and confirmation dialogs. Execution status warning when the managed cfg is not wired into autoexec. Benchmark page with live sample timeline. Optimize & Benchmark page with step progress and Keep/Restore. Custom Optimization picker page. Tooltips on restore/import; dialogs default focus to safest action (Cancel).
+- **UI** — dark WPF shell (Windows). Linux builds use a stub host so libraries/tests compile. Loading/empty/error states and confirmation dialogs. Execution status warning when the managed cfg is not wired into autoexec.
 
 ## How FrameForge modifies CS2 configuration
 

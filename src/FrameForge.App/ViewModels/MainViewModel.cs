@@ -278,6 +278,14 @@ public sealed class MainViewModel : ViewModelBase
         ExportIntelligenceCommand = new AsyncRelayCommand(ExportIntelligenceAsync, () => !IsBusy);
         ExportSnapshotsCommand = new AsyncRelayCommand(ExportSnapshotsAsync, () => !IsBusy);
         ImportIntelligenceCommand = new AsyncRelayCommand(ImportIntelligenceAsync, () => !IsBusy);
+        ConfirmImportMergeCommand = new AsyncRelayCommand(() => ConfirmImportAsync(IntelligenceImportMode.Merge), () => CanConfirmImport && !IsBusy);
+        ConfirmImportAsNewCommand = new AsyncRelayCommand(() => ConfirmImportAsync(IntelligenceImportMode.ImportAsNew), () => CanConfirmImport && !IsBusy);
+        CancelImportPreviewCommand = new RelayCommand(() =>
+        {
+            if (ImportPreview is not null) ImportPreview.IsVisible = false;
+            ImportPreview = null;
+            StatusMessage = "Import cancelled.";
+        });
     }
 
     public ObservableCollection<OptimizationListItem> Optimizations { get; } = new();
@@ -291,6 +299,9 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<BenchmarkRun> BenchmarkHistory { get; } = new();
     public ObservableCollection<BenchmarkChartPoint> BenchmarkChartPoints { get; } = new();
     public ObservableCollection<BenchmarkComparisonMetric> BenchmarkComparisonRows { get; } = new();
+    public ObservableCollection<BenchmarkComparisonDisplayRow> BenchmarkComparisonDisplayRows { get; } = new();
+    public ObservableCollection<BenchmarkConditionWarning> BenchmarkConditionWarnings { get; } = new();
+    public ObservableCollection<string> ImportPreviewLines { get; } = new();
     public ObservableCollection<GuidedOptimizationRun> GuidedHistory { get; } = new();
     public ObservableCollection<GuidedComparisonRow> GuidedComparisonRows { get; } = new();
     public ObservableCollection<string> GuidedProgressLines { get; } = new();
@@ -743,12 +754,17 @@ public sealed class MainViewModel : ViewModelBase
                 RaiseCanExecutes();
                 if (value is not null)
                 {
-                    _ = AssessSelectedForRestoreAsync(value.SettingKey);
+                    _ = BuildSettingDetailAsync(value);
+                }
+                else
+                {
+                    SettingDetail = null;
                 }
             }
         }
     }
     private SettingPerformanceRecord? _selectedPerformanceRecord;
+    private List<SettingPerformanceRecord> _allPerformanceRecords = new();
 
     public string SelectedPerformanceSummary
     {
@@ -776,6 +792,164 @@ public sealed class MainViewModel : ViewModelBase
         set { if (SetProperty(ref _selectedPerformanceEvidenceB, value)) RaiseCanExecutes(); }
     }
     private SettingTestEvidence? _selectedPerformanceEvidenceB;
+
+
+    public ImportPreviewViewState? ImportPreview
+    {
+        get => _importPreview;
+        set
+        {
+            if (SetProperty(ref _importPreview, value))
+            {
+                RaisePropertyChanged(nameof(IsImportPreviewVisible));
+                RaisePropertyChanged(nameof(CanConfirmImport));
+                ImportPreviewLines.Clear();
+                if (value is not null)
+                {
+                    ImportPreviewLines.Add(value.SummaryText);
+                    foreach (var e in value.Errors.Take(12))
+                    {
+                        ImportPreviewLines.Add("Error: " + e);
+                    }
+
+                    foreach (var c in value.ConflictDetails.Take(8))
+                    {
+                        ImportPreviewLines.Add("Conflict: " + c);
+                    }
+
+                    foreach (var f in value.DifferentFingerprints.Take(8))
+                    {
+                        ImportPreviewLines.Add("Different fingerprint: " + f);
+                    }
+                }
+
+                RaiseCanExecutes();
+            }
+        }
+    }
+    private ImportPreviewViewState? _importPreview;
+
+    public bool IsImportPreviewVisible => ImportPreview?.IsVisible == true;
+    public bool CanConfirmImport => ImportPreview is { IsValid: true, IsVisible: true };
+
+    public ICommand ConfirmImportMergeCommand { get; private set; } = null!;
+    public ICommand ConfirmImportAsNewCommand { get; private set; } = null!;
+    public ICommand CancelImportPreviewCommand { get; private set; } = null!;
+
+    public string PerformanceSystemFilter
+    {
+        get => _performanceSystemFilter;
+        set
+        {
+            if (SetProperty(ref _performanceSystemFilter, value ?? "Current system"))
+            {
+                ApplyPerformanceFilters();
+            }
+        }
+    }
+    private string _performanceSystemFilter = "Current system";
+
+    public IReadOnlyList<string> PerformanceSystemFilterOptions { get; } = new[]
+    {
+        "Current system",
+        "Other systems",
+        "All systems"
+    };
+
+    public string PerformanceClassificationFilter
+    {
+        get => _performanceClassificationFilter;
+        set
+        {
+            if (SetProperty(ref _performanceClassificationFilter, value ?? "(All classifications)"))
+            {
+                ApplyPerformanceFilters();
+            }
+        }
+    }
+    private string _performanceClassificationFilter = "(All classifications)";
+
+    public IReadOnlyList<string> PerformanceClassificationFilterOptions { get; } = new[]
+    {
+        "(All classifications)",
+        "Improved",
+        "Regressed",
+        "Neutral",
+        "Mixed",
+        "Inconclusive"
+    };
+
+    public string PerformanceConfidenceFilter
+    {
+        get => _performanceConfidenceFilter;
+        set
+        {
+            if (SetProperty(ref _performanceConfidenceFilter, value ?? "(All confidence)"))
+            {
+                ApplyPerformanceFilters();
+            }
+        }
+    }
+    private string _performanceConfidenceFilter = "(All confidence)";
+
+    public IReadOnlyList<string> PerformanceConfidenceFilterOptions { get; } = new[]
+    {
+        "(All confidence)",
+        "Unknown",
+        "Low",
+        "Medium",
+        "High"
+    };
+
+    public string PerformanceSettingFilter
+    {
+        get => _performanceSettingFilter;
+        set
+        {
+            if (SetProperty(ref _performanceSettingFilter, value ?? string.Empty))
+            {
+                ApplyPerformanceFilters();
+            }
+        }
+    }
+    private string _performanceSettingFilter = string.Empty;
+
+    public string PerformanceSortKind
+    {
+        get => _performanceSortKind;
+        set
+        {
+            if (SetProperty(ref _performanceSortKind, value ?? "Latest"))
+            {
+                ApplyPerformanceFilters();
+            }
+        }
+    }
+    private string _performanceSortKind = "Latest";
+
+    public IReadOnlyList<string> PerformanceSortOptions { get; } = new[]
+    {
+        "Latest",
+        "Most tested",
+        "Best result",
+        "Worst result"
+    };
+
+    public SettingDetailViewState? SettingDetail
+    {
+        get => _settingDetail;
+        set => SetProperty(ref _settingDetail, value);
+    }
+    private SettingDetailViewState? _settingDetail;
+
+    public string BenchmarkConditionWarningsSummary
+    {
+        get => _benchmarkConditionWarningsSummary;
+        set => SetProperty(ref _benchmarkConditionWarningsSummary, value ?? string.Empty);
+    }
+    private string _benchmarkConditionWarningsSummary = string.Empty;
+
+    public bool HasBenchmarkConditionWarnings => BenchmarkConditionWarnings.Count > 0;
 
     public string TargetedRestoreAssessmentText
     {
@@ -1118,6 +1292,8 @@ public sealed class MainViewModel : ViewModelBase
         (RefreshPerformanceIntelCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (ComparePerformanceEvidenceCommand as RelayCommand)?.RaiseCanExecuteChanged();
         (EvaluateTargetedRestoreCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (ConfirmImportMergeCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (ConfirmImportAsNewCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (RestoreSettingCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (RetestSettingCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
     }
@@ -2640,6 +2816,117 @@ public sealed class MainViewModel : ViewModelBase
     }
 
 
+
+    private void ApplyPerformanceFilters()
+    {
+        IEnumerable<SettingPerformanceRecord> q = _allPerformanceRecords;
+        switch (PerformanceSystemFilter)
+        {
+            case "Other systems":
+                q = q.Where(r => !r.IsCurrentSystem);
+                break;
+            case "All systems":
+                break;
+            default:
+                q = q.Where(r => r.IsCurrentSystem);
+                break;
+        }
+
+        if (!string.IsNullOrWhiteSpace(PerformanceSettingFilter))
+        {
+            var f = PerformanceSettingFilter.Trim();
+            q = q.Where(r =>
+                r.SettingName.Contains(f, StringComparison.OrdinalIgnoreCase) ||
+                r.SettingKey.Contains(f, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (PerformanceClassificationFilter is not "(All classifications)")
+        {
+            q = q.Where(r =>
+                string.Equals(r.LatestClassification?.ToString(), PerformanceClassificationFilter, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (PerformanceConfidenceFilter is not "(All confidence)")
+        {
+            q = q.Where(r =>
+                string.Equals(r.Confidence.ToString(), PerformanceConfidenceFilter, StringComparison.OrdinalIgnoreCase));
+        }
+
+        q = PerformanceSortKind switch
+        {
+            "Most tested" => q.OrderByDescending(r => r.TestCount).ThenBy(r => r.SettingName),
+            "Best result" => q.OrderByDescending(r => r.DirectImprovedCount)
+                .ThenByDescending(r => r.ImprovedCount)
+                .ThenBy(r => r.SettingName),
+            "Worst result" => q.OrderByDescending(r => r.DirectRegressedCount)
+                .ThenByDescending(r => r.RegressedCount)
+                .ThenBy(r => r.SettingName),
+            _ => q.OrderByDescending(r => r.LastTestedAt ?? DateTimeOffset.MinValue)
+                .ThenBy(r => r.SettingName)
+        };
+
+        var keep = SelectedPerformanceRecord?.SettingKey;
+        PerformanceRecords.Clear();
+        foreach (var r in q)
+        {
+            PerformanceRecords.Add(r);
+        }
+
+        RaisePropertyChanged(nameof(HasPerformanceRecords));
+        if (keep is not null)
+        {
+            SelectedPerformanceRecord = PerformanceRecords.FirstOrDefault(r =>
+                r.SettingKey.Equals(keep, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private async Task BuildSettingDetailAsync(SettingPerformanceRecord record)
+    {
+        try
+        {
+            string? current = null;
+            string? recommended = null;
+            try
+            {
+                var snap = await _cs2SettingsService.ReadSettingsAsync().ConfigureAwait(true);
+                var live = snap.Settings.FirstOrDefault(s =>
+                    s.Definition.ConfigKey.Equals(record.SettingKey, StringComparison.OrdinalIgnoreCase));
+                current = live?.CurrentValue;
+                recommended = live?.RecommendedValue ?? live?.Definition.RecommendedValue;
+            }
+            catch
+            {
+                // leave null
+            }
+
+            await AssessSelectedForRestoreAsync(record.SettingKey).ConfigureAwait(true);
+
+            SettingDetail = new SettingDetailViewState
+            {
+                SettingKey = record.SettingKey,
+                SettingName = record.SettingName,
+                CurrentValue = current,
+                RecommendedValue = recommended,
+                LastMeasuredResult = record.DisplayLatest,
+                TestCount = record.TestCount,
+                DirectTestCount = record.DirectTestCount,
+                AssociatedTestCount = record.AssociatedMultiSettingTestCount,
+                Confidence = record.DisplayConfidence,
+                ConfidenceReason = record.ConfidenceReason,
+                RecommendationSummary = record.RecommendationSummary,
+                FingerprintLabel = record.FingerprintLabel,
+                LatestTestAt = record.LastTestedAt,
+                RestoreState = TargetedRestoreAssessmentText,
+                CanRestore = CanTargetedRestore,
+                HasEvidence = record.HasEvidence
+            };
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug($"Setting detail failed: {ex.Message}");
+        }
+    }
+
     private async Task RefreshPerformanceIntelAsync()
     {
         try
@@ -2647,12 +2934,14 @@ public sealed class MainViewModel : ViewModelBase
             var index = await _perfIntel.GetIndexAsync(forceRebuild: true).ConfigureAwait(true);
             PerformanceFingerprintSummary = index.CurrentFingerprint?.DisplaySummary
                 ?? "Fingerprint unavailable.";
-            PerformanceRecords.Clear();
-            var source = ShowAllSystemFingerprints ? index.Records : index.Records.Where(r => r.IsCurrentSystem);
-            foreach (var r in source.Where(x => x.HasEvidence))
+            _allPerformanceRecords = index.Records.Where(x => x.HasEvidence).ToList();
+            // Sync system filter with legacy checkbox when toggled from older UI
+            if (ShowAllSystemFingerprints && PerformanceSystemFilter == "Current system")
             {
-                PerformanceRecords.Add(r);
+                PerformanceSystemFilter = "All systems";
             }
+
+            ApplyPerformanceFilters();
 
             if (index.Records.Count == 0 || index.Records.All(r => !r.HasEvidence))
             {
@@ -3302,42 +3591,81 @@ Full backup restore is a separate explicit action on the Backups page.",
         try
         {
             var preview = await _intelExport.PreviewImportAsync(dialog.FileName).ConfigureAwait(true);
+            var kind = dialog.FileName.Contains("snapshot", StringComparison.OrdinalIgnoreCase)
+                ? "Snapshots"
+                : "Intelligence";
+            var direct = preview.Package?.Evidence.Count(e => e.EvidenceType == PerformanceEvidenceType.SingleSetting) ?? 0;
+            var multi = preview.Package?.Evidence.Count(e => e.EvidenceType == PerformanceEvidenceType.MultiSetting) ?? 0;
+            ImportPreview = new ImportPreviewViewState
+            {
+                IsVisible = true,
+                IsValid = preview.IsValid,
+                SourcePath = dialog.FileName,
+                PackageKind = kind,
+                Message = preview.Message,
+                Errors = preview.Errors.ToList(),
+                FilesDetected = 1,
+                Records = preview.Package?.Records.Count ?? 0,
+                DirectEvidence = direct,
+                MultiSettingEvidence = multi,
+                Fingerprints = preview.Package?.Fingerprints.Count
+                    ?? preview.DifferentFingerprints.Count,
+                NewRecords = preview.RecordsToAdd,
+                ExistingConflicts = preview.Conflicts,
+                SkippedRecords = preview.RecordsToSkip,
+                InvalidRecords = preview.Errors.Count,
+                SnapshotsTotal = preview.SnapshotPackage?.Snapshots.Count ?? preview.SnapshotsToAdd,
+                SnapshotsValid = preview.IsValid ? (preview.SnapshotPackage?.Snapshots.Count ?? preview.SnapshotsToAdd) : 0,
+                SnapshotsInvalid = preview.IsValid ? 0 : Math.Max(1, preview.Errors.Count),
+                SnapshotsConflicting = 0,
+                DifferentFingerprints = preview.DifferentFingerprints.ToList(),
+                ConflictDetails = preview.ConflictDetails.ToList(),
+                SourcePreview = preview,
+                ProposedMode = IntelligenceImportMode.Merge
+            };
+
             if (!preview.IsValid)
             {
-                ErrorMessage = "Import validation failed: " + string.Join("; ", preview.Errors.Take(8));
-                StatusMessage = "Import rejected.";
+                ErrorMessage = "Import validation failed — see preview panel. No files were written.";
+                StatusMessage = "Import rejected (preview only).";
                 return;
             }
 
-            var fpNote = preview.DifferentFingerprints.Count > 0
-                ? $"\nDifferent system fingerprints: {preview.DifferentFingerprints.Count} (kept separate — never merged into current machine)."
-                : "\nAll fingerprints match current system or are unlabeled.";
+            StatusMessage = "Import preview ready. Confirm Merge or Import as new — default is Cancel.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
 
-            var summary =
-                $"Preview (default — no write yet):\n" +
-                $"Add {preview.RecordsToAdd}, update {preview.RecordsToUpdate}, skip {preview.RecordsToSkip}, " +
-                $"evidence +{preview.EvidenceToAdd}, snapshots +{preview.SnapshotsToAdd}, conflicts {preview.Conflicts}." +
-                fpNote +
-                "\n\nYes = Merge after confirm\nNo = Import as new history\nCancel = preview only (no changes)";
+    private async Task ConfirmImportAsync(IntelligenceImportMode mode)
+    {
+        if (ImportPreview is not { IsValid: true, SourcePath: not null and not "" })
+        {
+            StatusMessage = "Nothing to import.";
+            return;
+        }
 
-            var choice = MessageBox.Show(
-                summary,
-                "Import intelligence — safest action is Cancel",
-                MessageBoxButton.YesNoCancel,
-                MessageBoxImage.Question,
-                MessageBoxResult.Cancel);
+        var path = ImportPreview.SourcePath;
+        var confirm = MessageBox.Show(
+            mode == IntelligenceImportMode.Merge
+                ? "Merge imported history into local intelligence? Fingerprints stay separate."
+                : "Import as new history entries? Fingerprints stay separate.",
+            "Confirm import",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Question,
+            MessageBoxResult.Cancel);
+        if (confirm != MessageBoxResult.OK)
+        {
+            StatusMessage = "Import not confirmed.";
+            return;
+        }
 
-            if (choice == MessageBoxResult.Cancel)
-            {
-                StatusMessage = "Preview only — no import written.";
-                return;
-            }
-
-            var mode = choice == MessageBoxResult.Yes
-                ? IntelligenceImportMode.Merge
-                : IntelligenceImportMode.ImportAsNew;
-
-            var result = await _intelExport.ImportAsync(dialog.FileName, mode).ConfigureAwait(true);
+        try
+        {
+            IsBusy = true;
+            var result = await _intelExport.ImportAsync(path, mode).ConfigureAwait(true);
             if (!result.Success)
             {
                 ErrorMessage = result.Message;
@@ -3346,11 +3674,16 @@ Full backup restore is a separate explicit action on the Backups page.",
             }
 
             StatusMessage = result.Message;
+            ImportPreview = null;
             await RefreshPerformanceIntelAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
             ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
         }
     }
 
@@ -3429,16 +3762,49 @@ Full backup restore is a separate explicit action on the Backups page.",
         }
 
         var comparison = _benchmarkEngine.Compare(SelectedBenchmarkA, SelectedBenchmarkB);
+        var report = BenchmarkComparisonPresenter.Build(
+            comparison,
+            SelectedBenchmarkA.SystemInformation.SystemFingerprintId,
+            SelectedBenchmarkB.SystemInformation.SystemFingerprintId);
+
         BenchmarkComparisonRows.Clear();
+        BenchmarkComparisonDisplayRows.Clear();
+        BenchmarkConditionWarnings.Clear();
         foreach (var m in comparison.Metrics)
         {
             BenchmarkComparisonRows.Add(m);
         }
 
-        BenchmarkComparisonSummary = comparison.Summary +
+        foreach (var r in report.Rows)
+        {
+            BenchmarkComparisonDisplayRows.Add(r);
+        }
+
+        foreach (var w in report.ConditionWarnings)
+        {
+            BenchmarkConditionWarnings.Add(w);
+        }
+
+        // Prefer calculator warnings if already populated
+        if (comparison.ConditionWarnings.Count > 0 && BenchmarkConditionWarnings.Count == 0)
+        {
+            foreach (var w in comparison.ConditionWarnings)
+            {
+                BenchmarkConditionWarnings.Add(w);
+            }
+        }
+
+        BenchmarkConditionWarningsSummary = BenchmarkConditionWarnings.Count == 0
+            ? "No condition mismatches detected."
+            : string.Join(" · ", BenchmarkConditionWarnings.Select(w => w.Message).Take(6));
+        RaisePropertyChanged(nameof(HasBenchmarkConditionWarnings));
+
+        BenchmarkComparisonSummary = report.Summary +
             " A=" + SelectedBenchmarkA.DisplayTitle + " · B=" + SelectedBenchmarkB.DisplayTitle;
         RaisePropertyChanged(nameof(HasBenchmarkComparison));
-        StatusMessage = "Comparison ready.";
+        StatusMessage = BenchmarkConditionWarnings.Count > 0
+            ? "Comparison ready — condition warnings present."
+            : "Comparison ready.";
     }
 
     private async Task ExportBenchmarkJsonAsync()

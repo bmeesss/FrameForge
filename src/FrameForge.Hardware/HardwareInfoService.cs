@@ -20,16 +20,27 @@ public sealed class HardwareInfoService : IHardwareInfoService
             var threadCount = Math.Max(1, Environment.ProcessorCount);
             var physicalCores = TryGetPhysicalCoreCount() ?? EstimatePhysicalCores(threadCount);
 
+            var gpu = DetectGpuNameDetailed();
+            var display = TryDetectPrimaryDisplay();
+            var gameMode = TryDetectGameMode();
+            var power = TryDetectPowerPlanReadOnly();
+
             var info = new HardwareInfo
             {
                 CpuName = DetectCpuName(),
                 CpuCoreCount = physicalCores,
                 CpuThreadCount = threadCount,
-                GpuName = DetectGpuName(),
+                GpuName = gpu.Name,
+                GpuDetectionNotes = gpu.Notes,
                 TotalRamBytes = DetectTotalRamBytes(),
                 WindowsVersion = DetectOsVersionLabel(),
                 Architecture = RuntimeInformation.OSArchitecture.ToString(),
-                OsDescription = SafeOsDescription()
+                OsDescription = SafeOsDescription(),
+                DisplayResolution = display.Resolution,
+                DisplayRefreshRateHz = display.RefreshHz,
+                GameModeEnabled = gameMode,
+                PowerPlanName = power.Name,
+                PowerPlanStatus = power.Status
             };
 
             return Task.FromResult(info);
@@ -185,14 +196,123 @@ public sealed class HardwareInfoService : IHardwareInfoService
             }
         }
 
-        // Windows: WMI / DXGI would need platform packs. Report honestly.
-        // TODO(windows): enumerate adapters via DXGI or Win32_VideoController without third-party packages.
         if (OperatingSystem.IsWindows())
         {
-            return "GPU (name unavailable — Windows adapter enumeration pending)";
+            return DetectGpuNameDetailed().Name;
         }
 
         return "Unknown GPU";
+    }
+
+    private readonly record struct GpuDetection(string Name, string? Notes);
+
+    private static GpuDetection DetectGpuNameDetailed()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            // Prefer registry EnumDisplayDevices / PnP display adapters (documented Win32).
+            try
+            {
+                var adapters = WindowsNative.TryEnumerateDisplayAdapters();
+                if (adapters.Count > 0)
+                {
+                    // Prefer first non-Microsoft Basic Render
+                    var preferred = adapters.FirstOrDefault(a =>
+                        !a.Contains("Microsoft Basic Render", StringComparison.OrdinalIgnoreCase) &&
+                        !a.Contains("Remote Desktop", StringComparison.OrdinalIgnoreCase));
+                    if (string.IsNullOrWhiteSpace(preferred))
+                    {
+                        preferred = adapters[0];
+                    }
+
+                    return new GpuDetection(
+                        preferred,
+                        adapters.Count > 1
+                            ? $"Enumerated {adapters.Count} display adapters via EnumDisplayDevices (name only; utilization not queried)."
+                            : "Enumerated via EnumDisplayDevices (name only; utilization not queried).");
+                }
+            }
+            catch (Exception ex)
+            {
+                return new GpuDetection(
+                    "Unknown GPU",
+                    "Windows GPU enumeration failed: " + ex.Message);
+            }
+
+            return new GpuDetection(
+                "Unknown GPU",
+                "No display adapters returned by EnumDisplayDevices.");
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            var name = DetectGpuName();
+            return new GpuDetection(name, name.StartsWith("Unknown", StringComparison.OrdinalIgnoreCase) ? "Linux DRM probe returned no adapter." : null);
+        }
+
+        return new GpuDetection("Unknown GPU", "GPU detection not implemented on this OS.");
+    }
+
+    private readonly record struct DisplayDetection(string? Resolution, int? RefreshHz);
+
+    private static DisplayDetection TryDetectPrimaryDisplay()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return default;
+        }
+
+        try
+        {
+            var (res, hz) = WindowsNative.TryGetPrimaryDisplayMode();
+            return new DisplayDetection(res, hz);
+        }
+        catch
+        {
+            return default;
+        }
+    }
+
+    private static bool? TryDetectGameMode()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        try
+        {
+            return WindowsNative.TryReadGameModeEnabled();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private readonly record struct PowerDetection(string? Name, string? Status);
+
+    private static PowerDetection TryDetectPowerPlanReadOnly()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return new PowerDetection(null, "Power plan detection is Windows-oriented; not available on this OS.");
+        }
+
+        try
+        {
+            var name = WindowsNative.TryReadActivePowerPlanName();
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                return new PowerDetection(name, "Read-only from powercfg scheme list (no plan changes).");
+            }
+
+            return new PowerDetection(null, "Active power plan name unavailable (powercfg probe returned empty).");
+        }
+        catch (Exception ex)
+        {
+            return new PowerDetection(null, "Power plan not available: " + ex.Message);
+        }
     }
 
     private static long DetectTotalRamBytes()

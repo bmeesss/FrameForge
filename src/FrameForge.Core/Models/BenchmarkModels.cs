@@ -248,6 +248,9 @@ public sealed class BenchmarkSystemSnapshot
     public string? PowerPlanStatus { get; init; }
     public int? DisplayRefreshRateHz { get; init; }
     public string? DisplayResolution { get; init; }
+    public bool? GameModeEnabled { get; init; }
+    public string? SystemFingerprintId { get; init; }
+    public string? GpuDetectionNotes { get; init; }
     public string? Cs2InstallPath { get; init; }
     public string? Cs2VersionHint { get; init; }
     public bool Cs2ProcessRunningAtStart { get; init; }
@@ -290,6 +293,18 @@ public sealed class BenchmarkComparisonMetric
     public double? PercentDifference { get; init; }
     public bool IsAvailable { get; init; }
     public string? Notes { get; init; }
+    /// <summary>Human label: Lower / Higher / Unavailable — never invents values.</summary>
+    public string Interpretation { get; init; } = "Unavailable";
+    public string BeforeDisplay => IsAvailable && Before is not null ? Format(Before.Value) : "Unavailable";
+    public string AfterDisplay => IsAvailable && After is not null ? Format(After.Value) : "Unavailable";
+    public string DeltaDisplay => IsAvailable && Difference is not null
+        ? (Difference.Value > 0 ? "+" : "") + Difference.Value.ToString("0.##") + (string.IsNullOrEmpty(Unit) ? "" : " " + Unit)
+        : "Unavailable";
+
+    private string Format(double v) =>
+        Unit == "%" ? $"{v:0.#}%" :
+        Unit == "MB" ? (Math.Abs(v) >= 1024 ? $"{v/1024.0:0.00} GB" : $"{v:0.0} MB") :
+        $"{v:0.##}{(string.IsNullOrEmpty(Unit) ? "" : " " + Unit)}";
 }
 
 /// <summary>Side-by-side comparison of two runs (A = before, B = after).</summary>
@@ -298,6 +313,7 @@ public sealed class BenchmarkComparison
     public BenchmarkRun RunA { get; init; } = new();
     public BenchmarkRun RunB { get; init; } = new();
     public IReadOnlyList<BenchmarkComparisonMetric> Metrics { get; init; } = Array.Empty<BenchmarkComparisonMetric>();
+    public IReadOnlyList<BenchmarkConditionWarning> ConditionWarnings { get; init; } = Array.Empty<BenchmarkConditionWarning>();
     public string Summary { get; init; } = string.Empty;
 }
 

@@ -17,7 +17,6 @@ public sealed class ManagedConfigWatcher : IManagedConfigWatcher
     public const string HashStoreFileName = "managed-file-hashes.json";
 
     private readonly ICs2DetectionService _detection;
-    private readonly ICs2SettingsService _settings;
     private readonly IPathService _paths;
     private readonly IAppLog _log;
     private readonly object _gate = new();
@@ -28,15 +27,15 @@ public sealed class ManagedConfigWatcher : IManagedConfigWatcher
     private string? _managedPath;
     private string? _autoexecPath;
     private DateTimeOffset _lastEvent = DateTimeOffset.MinValue;
+    private int _selfWriteDepth;
+    private DateTimeOffset _selfWriteUntil = DateTimeOffset.MinValue;
 
     public ManagedConfigWatcher(
         ICs2DetectionService detection,
-        ICs2SettingsService settings,
         IPathService paths,
         IAppLog log)
     {
         _detection = detection;
-        _settings = settings;
         _paths = paths;
         _log = log;
         Directory.CreateDirectory(_paths.PerformanceHistoryDirectory);
@@ -130,6 +129,43 @@ public sealed class ManagedConfigWatcher : IManagedConfigWatcher
         _log.LogDebug("Captured managed file hash baseline.");
     }
 
+    public void BeginSelfWrite()
+    {
+        lock (_gate)
+        {
+            _selfWriteDepth++;
+            _selfWriteUntil = DateTimeOffset.UtcNow.AddSeconds(3);
+        }
+    }
+
+    public async Task EndSelfWriteAndCaptureBaselineAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await CaptureBaselineAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                if (_selfWriteDepth > 0)
+                {
+                    _selfWriteDepth--;
+                }
+
+                _selfWriteUntil = DateTimeOffset.UtcNow.AddMilliseconds(750);
+            }
+        }
+    }
+
+    private bool IsSelfWriteActive()
+    {
+        lock (_gate)
+        {
+            return _selfWriteDepth > 0 || DateTimeOffset.UtcNow < _selfWriteUntil;
+        }
+    }
+
     public async Task<bool> HasExternalChangesAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -201,6 +237,11 @@ public sealed class ManagedConfigWatcher : IManagedConfigWatcher
         if (string.IsNullOrWhiteSpace(path))
         {
             return;
+        }
+
+        if (IsSelfWriteActive())
+        {
+            return; // FrameForge-owned write — baseline refreshed by EndSelfWrite
         }
 
         var name = Path.GetFileName(path);
@@ -291,10 +332,15 @@ public sealed class ManagedConfigWatcher : IManagedConfigWatcher
             return;
         }
 
-        var snap = await _settings.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
-        _cfgDir = snap.CfgDirectory;
-        _managedPath = snap.ManagedConfigPath;
-        _autoexecPath = snap.AutoexecPath;
+        var install = await _detection.DetectAsync(cancellationToken).ConfigureAwait(false);
+        if (!install.IsInstalled || string.IsNullOrWhiteSpace(install.CfgDirectory))
+        {
+            return;
+        }
+
+        _cfgDir = install.CfgDirectory;
+        _managedPath = Path.Combine(_cfgDir, Cs2SettingsService.ManagedFileName);
+        _autoexecPath = Path.Combine(_cfgDir, Cs2AutoexecIntegration.AutoexecFileName);
     }
 
     private string HashStorePath =>

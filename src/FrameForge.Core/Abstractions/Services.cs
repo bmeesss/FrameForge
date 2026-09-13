@@ -377,7 +377,7 @@ public interface IIntelligenceExportService
 /// Lightweight watch of FrameForge-managed cfg files. One centralized service.
 /// Invalidates targeted-restore safety when external edits are detected.
 /// </summary>
-public interface IManagedConfigWatcher : IDisposable
+public interface IManagedConfigWatcher : IDisposable, IManagedConfigBaselineSink
 {
     bool IsWatching { get; }
     event EventHandler<ExternalConfigChangeEventArgs>? ExternalChangeDetected;
@@ -386,11 +386,22 @@ public interface IManagedConfigWatcher : IDisposable
     Task StartAsync(CancellationToken cancellationToken = default);
     void Stop();
 
-    /// <summary>Capture current hashes after a FrameForge-owned write.</summary>
-    Task CaptureBaselineAsync(CancellationToken cancellationToken = default);
-
     /// <summary>True if managed files differ from last FrameForge baseline.</summary>
     Task<bool> HasExternalChangesAsync(CancellationToken cancellationToken = default);
 
     Task InvalidateRestoreCacheAsync();
+}
+
+/// <summary>
+/// Narrow sink so CS2 settings apply can refresh hashes without referencing Infrastructure.
+/// </summary>
+public interface IManagedConfigBaselineSink
+{
+    /// <summary>Mark upcoming FrameForge-owned writes so the watcher does not treat them as external.</summary>
+    void BeginSelfWrite();
+
+    /// <summary>End self-write window and capture a fresh hash baseline.</summary>
+    Task EndSelfWriteAndCaptureBaselineAsync(CancellationToken cancellationToken = default);
+
+    Task CaptureBaselineAsync(CancellationToken cancellationToken = default);
 }
