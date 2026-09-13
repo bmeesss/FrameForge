@@ -44,6 +44,7 @@
           <Button Content="Benchmark" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Benchmark" />
           <Button Content="Optimize &amp; Benchmark" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Guided" />
           <Button Content="Custom Optimization" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Custom" />
+          <Button Content="Performance History" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Performance" />
           <Button Content="Settings" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Settings" />
         </StackPanel>
       </DockPanel>
@@ -797,10 +798,26 @@
                               <TextBox Text="{Binding PendingValue, UpdateSourceTrigger=PropertyChanged}" Padding="4" MinWidth="120" />
                             </DockPanel>
                             <TextBlock Text="{Binding DistinctionHint}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding IntelligenceHint}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
                           </StackPanel>
                           <StackPanel Grid.Column="2" Margin="8,0,0,0">
-                            <TextBlock Text="Measured result:" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" />
-                            <TextBlock Text="— run guided test" FontSize="12" TextWrapping="Wrap" />
+                            <TextBlock Text="Measured (local):" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" />
+                            <TextBlock FontSize="12" TextWrapping="Wrap">
+                              <Run Text="Latest:" />
+                              <Run Text="{Binding LatestResultDisplay, FallbackValue=—}" FontWeight="SemiBold" />
+                            </TextBlock>
+                            <TextBlock FontSize="11" TextWrapping="Wrap">
+                              <Run Text="Tests:" />
+                              <Run Text="{Binding TestCountDisplay, FallbackValue=—}" />
+                            </TextBlock>
+                            <TextBlock FontSize="11" TextWrapping="Wrap">
+                              <Run Text="Confidence:" />
+                              <Run Text="{Binding ConfidenceDisplay, FallbackValue=—}" />
+                            </TextBlock>
+                            <TextBlock FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}">
+                              <Run Text="Last:" />
+                              <Run Text="{Binding LastTestedDisplay, FallbackValue=—}" />
+                            </TextBlock>
                           </StackPanel>
                         </Grid>
                       </Border>
@@ -820,6 +837,11 @@
                   <Button Content="Reset via backup" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ResetSelectedSettingViaBackupCommand}" Margin="0,0,8,8" />
                 </WrapPanel>
                 <TextBlock Text="{Binding CustomResetExplanation}" TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" />
+                <TextBlock FontWeight="SemiBold" Margin="0,4,0,4">Based on your tests</TextBlock>
+                <TextBlock Text="{Binding GlobalRecommendationBlurb}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <TextBlock Text="{Binding PerformanceIntelStatus}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <Button Content="Assess targeted restore (no execute)" Style="{StaticResource NavButtonStyle}" Command="{Binding EvaluateTargetedRestoreCommand}" Margin="0,0,8,8" Padding="8,4" />
+                <TextBlock Text="{Binding TargetedRestoreAssessmentText}" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" />
                 <DockPanel Margin="0,0,0,8">
                   <TextBlock Text="Set name:" VerticalAlignment="Center" Margin="0,0,8,0" />
                   <Button DockPanel.Dock="Right" Content="Save selection as set" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveCustomSetCommand}" Margin="8,0,0,0" />
@@ -851,6 +873,157 @@
                   <Button Content="Rename" Style="{StaticResource NavButtonStyle}" Command="{Binding RenameCustomSetCommand}" Margin="0,0,8,4" Padding="8,4" />
                   <Button Content="Delete" Style="{StaticResource NavButtonStyle}" Command="{Binding DeleteCustomSetCommand}" Margin="0,0,8,4" Padding="8,4" />
                 </WrapPanel>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- Performance History (Phase 7) -->
+        <ScrollViewer Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Performance}">
+          <StackPanel>
+            <TextBlock Text="Performance History" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,12"
+                       Text="Local intelligence from your guided benchmark history only. No telemetry upload. Single-setting evidence is stronger than multi-setting. Confidence is heuristic — not statistical proof. No FPS guarantees." />
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,4">System fingerprint (non-sensitive)</TextBlock>
+                <TextBlock Text="{Binding PerformanceFingerprintSummary}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <TextBlock Text="{Binding PerformanceIntelStatus}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <TextBlock Text="{Binding GlobalRecommendationBlurb}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <Button Content="Rebuild intelligence cache" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RefreshPerformanceIntelCommand}" HorizontalAlignment="Left" />
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Settings with local evidence</TextBlock>
+                <ListBox ItemsSource="{Binding PerformanceRecords}" SelectedItem="{Binding SelectedPerformanceRecord}"
+                         Background="Transparent" BorderThickness="0" MaxHeight="260">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,6" Padding="10">
+                        <StackPanel>
+                          <TextBlock FontWeight="SemiBold">
+                            <Run Text="{Binding SettingName}" />
+                            <Run Text=" (" Foreground="{StaticResource TextSecondaryBrush}" />
+                            <Run Text="{Binding SettingKey}" Foreground="{StaticResource TextSecondaryBrush}" />
+                            <Run Text=")" Foreground="{StaticResource TextSecondaryBrush}" />
+                          </TextBlock>
+                          <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}">
+                            <Run Text="Latest:" />
+                            <Run Text="{Binding DisplayLatest}" />
+                            <Run Text=" · Confidence:" />
+                            <Run Text="{Binding DisplayConfidence}" />
+                            <Run Text=" · Direct:" />
+                            <Run Text="{Binding DirectTestCount}" />
+                            <Run Text=" · Multi:" />
+                            <Run Text="{Binding AssociatedMultiSettingTestCount}" />
+                          </TextBlock>
+                          <TextBlock Text="{Binding RecommendationSummary}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,4">Selected setting detail</TextBlock>
+                <TextBlock Text="{Binding SelectedPerformanceSummary}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,4">Evidence (direct + associated)</TextBlock>
+                <ListBox ItemsSource="{Binding PerformanceEvidenceRows}" Background="Transparent" BorderThickness="0" MaxHeight="200"
+                         Name="EvidenceList">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,6" Padding="8">
+                        <StackPanel>
+                          <TextBlock FontSize="12">
+                            <Run Text="{Binding TestedAt, StringFormat={}{0:g}}" />
+                            <Run Text=" · " />
+                            <Run Text="{Binding EvidenceType}" FontWeight="SemiBold" />
+                            <Run Text=" · " />
+                            <Run Text="{Binding Classification}" />
+                            <Run Text=" · run " />
+                            <Run Text="{Binding GuidedRunId}" />
+                          </TextBlock>
+                          <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}">
+                            <Run Text="Benchmarks:" />
+                            <Run Text="{Binding InitialBenchmarkId}" />
+                            <Run Text=" → " />
+                            <Run Text="{Binding PostBenchmarkId}" />
+                            <Run Text=" · complete=" />
+                            <Run Text="{Binding BenchmarkComplete}" />
+                          </TextBlock>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Multi-run comparison (same setting)</TextBlock>
+                <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8"
+                           Text="Pick two evidence rows below (A then B), then compare. Values are raw recorded deltas — not smoothed or invented." />
+                <Grid Margin="0,0,0,8">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                    <TextBlock Text="Run A" FontWeight="SemiBold" />
+                    <ComboBox ItemsSource="{Binding PerformanceEvidenceRows}" SelectedItem="{Binding SelectedPerformanceEvidenceA}"
+                              DisplayMemberPath="GuidedRunId" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1">
+                    <TextBlock Text="Run B" FontWeight="SemiBold" />
+                    <ComboBox ItemsSource="{Binding PerformanceEvidenceRows}" SelectedItem="{Binding SelectedPerformanceEvidenceB}"
+                              DisplayMemberPath="GuidedRunId" />
+                  </StackPanel>
+                </Grid>
+                <Button Content="Compare A vs B" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ComparePerformanceEvidenceCommand}" HorizontalAlignment="Left" Margin="0,0,0,8" />
+                <ItemsControl ItemsSource="{Binding PerformanceCompareRows}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="2*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding Metric}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="1" Text="{Binding DeltaA, StringFormat={}{0:+0.##;-0.##;0}}" />
+                        <TextBlock Grid.Column="2" Text="{Binding ClassificationA}" />
+                        <TextBlock Grid.Column="3" Text="{Binding DeltaB, StringFormat={}{0:+0.##;-0.##;0}}" />
+                        <TextBlock Grid.Column="4" Text="{Binding ClassificationB}" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Trend (direct tests · System CPU Δ when available)</TextBlock>
+                <ItemsControl ItemsSource="{Binding PerformanceTrendPoints}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <DockPanel Margin="0,2">
+                        <TextBlock DockPanel.Dock="Left" Width="120" Text="{Binding Label}" FontSize="11" />
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding Classification}" FontSize="11" Margin="8,0,0,0" />
+                        <TextBlock Text="{Binding Value, StringFormat={}{0:+0.0;-0.0;0} pp}" FontSize="12" />
+                      </DockPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
               </StackPanel>
             </Border>
           </StackPanel>

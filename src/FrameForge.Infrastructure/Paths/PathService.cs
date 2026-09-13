@@ -34,6 +34,7 @@ public sealed class PathService : IPathService
         Directory.CreateDirectory(BenchmarksDirectory);
         Directory.CreateDirectory(GuidedRunsDirectory);
         Directory.CreateDirectory(CustomOptimizationSetsDirectory);
+        Directory.CreateDirectory(PerformanceHistoryDirectory);
     }
 
     public string AppDataDirectory { get; }
@@ -45,4 +46,5 @@ public sealed class PathService : IPathService
     public string BenchmarksDirectory => Path.Combine(AppDataDirectory, "Benchmarks");
     public string GuidedRunsDirectory => Path.Combine(AppDataDirectory, "GuidedRuns");
     public string CustomOptimizationSetsDirectory => Path.Combine(AppDataDirectory, "CustomOptimizationSets");
+    public string PerformanceHistoryDirectory => Path.Combine(AppDataDirectory, "PerformanceHistory");
 }

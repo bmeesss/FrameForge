@@ -29,6 +29,7 @@ public interface IBackupService
         IEnumerable<string> affectedFiles,
         IReadOnlyDictionary<string, string?> previousValues,
         string? profileId = null,
+        IEnumerable<SettingChangeSnapshot>? settingChangeSnapshots = null,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<BackupEntry>> ListBackupsAsync(CancellationToken cancellationToken = default);
@@ -149,7 +150,9 @@ public interface IPathService
     string BenchmarksDirectory { get; }
     string GuidedRunsDirectory { get; }
     string CustomOptimizationSetsDirectory { get; }
+    string PerformanceHistoryDirectory { get; }
 }
+
 
 /// <summary>
 /// Builds the user-facing individual optimization catalog from supported CS2 settings.
@@ -275,4 +278,58 @@ public interface IGuidedOptimizationStore
     Task<IReadOnlyList<GuidedOptimizationRun>> ListAsync(CancellationToken cancellationToken = default);
     Task<GuidedOptimizationRun?> GetAsync(string runId, CancellationToken cancellationToken = default);
     Task DeleteAsync(string runId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Builds a stable local system fingerprint from non-sensitive hardware/OS fields only.
+/// </summary>
+public interface ISystemFingerprintService
+{
+    Task<SystemFingerprint> GetFingerprintAsync(CancellationToken cancellationToken = default);
+    SystemFingerprint FromHardware(HardwareInfo hardware);
+}
+
+/// <summary>
+/// Local performance intelligence: aggregates guided history into per-setting records.
+/// In-memory cache; rebuild on guided/benchmark changes or manual refresh. No telemetry.
+/// </summary>
+public interface IPerformanceIntelligenceService
+{
+    /// <summary>Rebuild analysis from guided history (and optional disk index refresh).</summary>
+    Task<PerformanceIntelligenceIndex> RebuildAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Return cached index or rebuild if empty/stale flag set.</summary>
+    Task<PerformanceIntelligenceIndex> GetIndexAsync(bool forceRebuild = false, CancellationToken cancellationToken = default);
+
+    void InvalidateCache();
+
+    SettingPerformanceRecord? GetRecord(string settingKeyOrId);
+
+    IReadOnlyList<SettingPerformanceRecord> GetAllRecords();
+
+    IReadOnlyList<SettingTestEvidence> GetEvidenceForSetting(string settingKeyOrId);
+
+    string GetRecommendationBlurb(string settingKeyOrId);
+}
+
+/// <summary>
+/// Persists per-key setting change snapshots alongside full backups (local JSON).
+/// </summary>
+public interface ISettingChangeSnapshotStore
+{
+    Task AppendAsync(IEnumerable<SettingChangeSnapshot> snapshots, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SettingChangeSnapshot>> ListAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SettingChangeSnapshot>> ListForKeyAsync(string configKey, CancellationToken cancellationToken = default);
+    Task<SettingChangeSnapshot?> GetLatestForKeyAsync(string configKey, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Evaluates whether a targeted (surgical) restore would be safe.
+/// Does not perform the restore — full backup restore remains the safe UI path.
+/// </summary>
+public interface ITargetedRestoreEvaluator
+{
+    Task<TargetedRestoreAssessment> EvaluateAsync(
+        string configKey,
+        CancellationToken cancellationToken = default);
 }

@@ -22,6 +22,7 @@ public sealed class Cs2SettingsService : ICs2SettingsService
     private readonly IBackupService _backups;
     private readonly IAppSettingsService _appSettings;
     private readonly IAppLog _log;
+    private readonly ISettingChangeSnapshotStore? _changeSnapshots;
 
     public Cs2SettingsService(
         ICs2SettingCatalog catalog,
@@ -29,7 +30,8 @@ public sealed class Cs2SettingsService : ICs2SettingsService
         ICs2DetectionService detection,
         IBackupService backups,
         IAppSettingsService appSettings,
-        IAppLog log)
+        IAppLog log,
+        ISettingChangeSnapshotStore? changeSnapshots = null)
     {
         _catalog = catalog;
         _config = config;
@@ -37,6 +39,7 @@ public sealed class Cs2SettingsService : ICs2SettingsService
         _backups = backups;
         _appSettings = appSettings;
         _log = log;
+        _changeSnapshots = changeSnapshots;
     }
 
     public string ManagedConfigFileName => ManagedFileName;
@@ -363,6 +366,22 @@ public sealed class Cs2SettingsService : ICs2SettingsService
                 .Where(e => !e.SettingId.Equals("integration.autoexec", StringComparison.OrdinalIgnoreCase))
                 .ToDictionary(e => e.ConfigKey, e => e.CurrentValue, StringComparer.OrdinalIgnoreCase);
 
+            var keySnaps = diff.Entries
+                .Where(e => e.IsChange &&
+                            !e.SettingId.Equals("integration.autoexec", StringComparison.OrdinalIgnoreCase))
+                .Select(e => new SettingChangeSnapshot
+                {
+                    SettingId = e.SettingId,
+                    ConfigKey = e.ConfigKey,
+                    PreviousValue = e.CurrentValue,
+                    NewValue = e.NewValue,
+                    File = managedPath,
+                    Timestamp = DateTimeOffset.UtcNow,
+                    ProfileId = profileId,
+                    Reason = reason
+                })
+                .ToList();
+
             try
             {
                 var entry = await _backups.CreateBackupAsync(
@@ -371,8 +390,26 @@ public sealed class Cs2SettingsService : ICs2SettingsService
                     affectedFiles: filesToBackup,
                     previousValues: previous,
                     profileId: profileId,
+                    settingChangeSnapshots: keySnaps,
                     cancellationToken: cancellationToken).ConfigureAwait(false);
                 backupId = entry.Id;
+
+                if (_changeSnapshots is not null && keySnaps.Count > 0)
+                {
+                    foreach (var s in keySnaps)
+                    {
+                        s.BackupId = backupId;
+                    }
+
+                    try
+                    {
+                        await _changeSnapshots.AppendAsync(keySnaps, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception snapEx)
+                    {
+                        _log.LogWarning($"Per-key change snapshot append failed (non-fatal): {snapEx.Message}");
+                    }
+                }
 
                 appSettings.LastSettingsBackupId = backupId;
                 await _appSettings.SaveAsync(appSettings, cancellationToken).ConfigureAwait(false);

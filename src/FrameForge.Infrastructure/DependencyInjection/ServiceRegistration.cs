@@ -9,6 +9,7 @@ using FrameForge.Infrastructure.Dashboard;
 using FrameForge.Infrastructure.Guided;
 using FrameForge.Infrastructure.Logging;
 using FrameForge.Infrastructure.Paths;
+using FrameForge.Infrastructure.Performance;
 using FrameForge.Infrastructure.Profiles;
 using FrameForge.Infrastructure.Settings;
 using FrameForge.Optimization;
@@ -47,6 +48,10 @@ public static class ServiceRegistration
         services.AddSingleton<IGuidedOptimizationService, GuidedOptimizationService>();
         services.AddSingleton<IIndividualOptimizationCatalog, IndividualOptimizationCatalog>();
         services.AddSingleton<ICustomOptimizationSetStore, CustomOptimizationSetStore>();
+        services.AddSingleton<ISystemFingerprintService, SystemFingerprintService>();
+        services.AddSingleton<ISettingChangeSnapshotStore, SettingChangeSnapshotStore>();
+        services.AddSingleton<IPerformanceIntelligenceService, PerformanceIntelligenceService>();
+        services.AddSingleton<ITargetedRestoreEvaluator, TargetedRestoreEvaluator>();
         return services;
     }
 

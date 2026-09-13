@@ -19,7 +19,14 @@ public sealed class BackupEntry
     /// so a newly created managed cfg / autoexec returns to the prior absence state.
     /// </summary>
     public List<string> CreatedFiles { get; init; } = new();
+
+    /// <summary>
+    /// Per-key change metadata captured at backup time (Phase 7).
+    /// Does not replace full file snapshots; enables future targeted-restore assessment.
+    /// </summary>
+    public List<SettingChangeSnapshot> SettingChangeSnapshots { get; init; } = new();
 }
+
 
 /// <summary>
 /// Root metadata.json document for the backup store.

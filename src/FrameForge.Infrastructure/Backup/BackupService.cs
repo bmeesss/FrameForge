@@ -28,6 +28,7 @@ public sealed class BackupService : IBackupService
         IEnumerable<string> affectedFiles,
         IReadOnlyDictionary<string, string?> previousValues,
         string? profileId = null,
+        IEnumerable<SettingChangeSnapshot>? settingChangeSnapshots = null,
         CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -80,6 +81,24 @@ public sealed class BackupService : IBackupService
                     $"Backup failed: could not snapshot any of the requested files ({copyFailures.Count} failure(s)).");
             }
 
+            var keySnaps = (settingChangeSnapshots ?? Array.Empty<SettingChangeSnapshot>())
+                .Select(s =>
+                {
+                    s.BackupId ??= id;
+                    if (string.IsNullOrWhiteSpace(s.Id))
+                    {
+                        s.Id = "scs_" + Guid.NewGuid().ToString("N")[..12];
+                    }
+
+                    if (s.Timestamp == default)
+                    {
+                        s.Timestamp = DateTimeOffset.UtcNow;
+                    }
+
+                    return s;
+                })
+                .ToList();
+
             var entry = new BackupEntry
             {
                 Id = id,
@@ -90,7 +109,8 @@ public sealed class BackupService : IBackupService
                 PreviousValues = previousValues.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase),
                 ProfileId = profileId,
                 FileSnapshots = snapshots,
-                CreatedFiles = created
+                CreatedFiles = created,
+                SettingChangeSnapshots = keySnaps
             };
 
             var store = await LoadStoreAsync(cancellationToken).ConfigureAwait(false);

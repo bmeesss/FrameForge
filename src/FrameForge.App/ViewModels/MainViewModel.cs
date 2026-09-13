@@ -27,6 +27,8 @@ public sealed class MainViewModel : ViewModelBase
     private readonly IGuidedOptimizationStore _guidedStore;
     private readonly IIndividualOptimizationCatalog _individualCatalog;
     private readonly ICustomOptimizationSetStore _customSetStore;
+    private readonly IPerformanceIntelligenceService _perfIntel;
+    private readonly ITargetedRestoreEvaluator _targetedRestore;
     private readonly IAppLog _log;
 
     private string _currentPage = "Home";
@@ -59,6 +61,8 @@ public sealed class MainViewModel : ViewModelBase
         IGuidedOptimizationStore guidedStore,
         IIndividualOptimizationCatalog individualCatalog,
         ICustomOptimizationSetStore customSetStore,
+        IPerformanceIntelligenceService perfIntel,
+        ITargetedRestoreEvaluator targetedRestore,
         IAppLog log)
     {
         _dashboardService = dashboardService;
@@ -77,6 +81,8 @@ public sealed class MainViewModel : ViewModelBase
         _guidedStore = guidedStore;
         _individualCatalog = individualCatalog;
         _customSetStore = customSetStore;
+        _perfIntel = perfIntel;
+        _targetedRestore = targetedRestore;
         _log = log;
         _guided.StatusChanged += (_, _) =>
         {
@@ -217,6 +223,23 @@ public sealed class MainViewModel : ViewModelBase
         DuplicateCustomSetCommand = new AsyncRelayCommand(DuplicateSelectedCustomSetAsync, () => !IsBusy && SelectedCustomSet is not null);
         RenameCustomSetCommand = new AsyncRelayCommand(RenameSelectedCustomSetAsync, () => !IsBusy && SelectedCustomSet is not null);
         ResetSelectedSettingViaBackupCommand = new AsyncRelayCommand(ResetSelectedViaBackupAsync, () => !IsBusy && HasCustomSelection);
+
+        RefreshPerformanceIntelCommand = new AsyncRelayCommand(RefreshPerformanceIntelAsync, () => !IsBusy);
+        SelectPerformanceSettingCommand = new RelayCommand(p =>
+        {
+            if (p is SettingPerformanceRecord rec)
+            {
+                SelectedPerformanceRecord = rec;
+            }
+            else if (p is string key)
+            {
+                SelectedPerformanceRecord = PerformanceRecords.FirstOrDefault(r =>
+                    r.SettingKey.Equals(key, StringComparison.OrdinalIgnoreCase));
+            }
+        });
+        ComparePerformanceEvidenceCommand = new RelayCommand(BuildPerformanceMultiRunComparison, () =>
+            SelectedPerformanceRecord is not null && SelectedPerformanceEvidenceA is not null && SelectedPerformanceEvidenceB is not null);
+        EvaluateTargetedRestoreCommand = new AsyncRelayCommand(EvaluateTargetedRestoreAsync, () => !IsBusy && HasCustomSelection);
     }
 
     public ObservableCollection<OptimizationListItem> Optimizations { get; } = new();
@@ -235,6 +258,10 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<string> GuidedProgressLines { get; } = new();
     public ObservableCollection<CustomOptimizationRowViewModel> CustomOptimizationRows { get; } = new();
     public ObservableCollection<CustomOptimizationSet> CustomOptimizationSets { get; } = new();
+    public ObservableCollection<SettingPerformanceRecord> PerformanceRecords { get; } = new();
+    public ObservableCollection<SettingTestEvidence> PerformanceEvidenceRows { get; } = new();
+    public ObservableCollection<PerformanceRunCompareRow> PerformanceCompareRows { get; } = new();
+    public ObservableCollection<PerformanceTrendPoint> PerformanceTrendPoints { get; } = new();
     public ObservableCollection<IndividualOptimizationUiCategory> CustomUiCategories { get; } = new();
     public ObservableCollection<RiskLevel> CustomRiskLevels { get; } = new();
     public IReadOnlyList<string> CustomCategoryFilterOptions { get; } = new[]
@@ -361,6 +388,7 @@ public sealed class MainViewModel : ViewModelBase
                 RaisePropertyChanged(nameof(IsBenchmarkPage));
                 RaisePropertyChanged(nameof(IsGuidedPage));
                 RaisePropertyChanged(nameof(IsCustomPage));
+                RaisePropertyChanged(nameof(IsPerformancePage));
             }
         }
     }
@@ -374,6 +402,7 @@ public sealed class MainViewModel : ViewModelBase
     public bool IsBenchmarkPage => CurrentPage.Equals("Benchmark", StringComparison.OrdinalIgnoreCase);
     public bool IsGuidedPage => CurrentPage.Equals("Guided", StringComparison.OrdinalIgnoreCase);
     public bool IsCustomPage => CurrentPage.Equals("Custom", StringComparison.OrdinalIgnoreCase);
+    public bool IsPerformancePage => CurrentPage.Equals("Performance", StringComparison.OrdinalIgnoreCase);
 
     public string StatusMessage
     {
@@ -607,6 +636,109 @@ public sealed class MainViewModel : ViewModelBase
         "Reset uses the existing FrameForge backup/restore path for managed cfg + autoexec. " +
         "It restores the last FrameForge settings backup as a whole — not a single-key surgical restore. " +
         "Precise single-key restore without a dedicated per-key snapshot is not guaranteed.";
+
+    public ICommand RefreshPerformanceIntelCommand { get; }
+    public ICommand SelectPerformanceSettingCommand { get; }
+    public ICommand ComparePerformanceEvidenceCommand { get; }
+    public ICommand EvaluateTargetedRestoreCommand { get; }
+
+    public string PerformanceFingerprintSummary
+    {
+        get => _performanceFingerprintSummary;
+        set => SetProperty(ref _performanceFingerprintSummary, value ?? string.Empty);
+    }
+    private string _performanceFingerprintSummary = "Fingerprint not loaded.";
+
+    public string PerformanceIntelStatus
+    {
+        get => _performanceIntelStatus;
+        set => SetProperty(ref _performanceIntelStatus, value ?? string.Empty);
+    }
+    private string _performanceIntelStatus = "Local intelligence idle.";
+
+    public string GlobalRecommendationBlurb
+    {
+        get => _globalRecommendationBlurb;
+        set => SetProperty(ref _globalRecommendationBlurb, value ?? string.Empty);
+    }
+    private string _globalRecommendationBlurb = "No local benchmark evidence yet.";
+
+    public bool HasPerformanceRecords => PerformanceRecords.Count > 0;
+
+    public SettingPerformanceRecord? SelectedPerformanceRecord
+    {
+        get => _selectedPerformanceRecord;
+        set
+        {
+            if (SetProperty(ref _selectedPerformanceRecord, value))
+            {
+                PerformanceEvidenceRows.Clear();
+                PerformanceTrendPoints.Clear();
+                if (value is not null)
+                {
+                    foreach (var e in value.DirectEvidence)
+                    {
+                        PerformanceEvidenceRows.Add(e);
+                    }
+                    foreach (var e in value.AssociatedEvidence)
+                    {
+                        PerformanceEvidenceRows.Add(e);
+                    }
+                    foreach (var e in value.DirectEvidence.OrderBy(x => x.TestedAt))
+                    {
+                        var cpu = e.ComparisonRows.FirstOrDefault(r =>
+                            r.IsAvailable && r.Metric.Contains("System CPU", StringComparison.OrdinalIgnoreCase));
+                        PerformanceTrendPoints.Add(new PerformanceTrendPoint
+                        {
+                            Label = e.TestedAt.LocalDateTime.ToString("MM-dd HH:mm"),
+                            Value = cpu?.AbsoluteDifference ?? 0,
+                            Classification = e.Classification.ToString(),
+                            EvidenceType = e.EvidenceType.ToString()
+                        });
+                    }
+                }
+                RaisePropertyChanged(nameof(SelectedPerformanceSummary));
+                RaisePropertyChanged(nameof(HasPerformanceEvidence));
+                RaiseCanExecutes();
+            }
+        }
+    }
+    private SettingPerformanceRecord? _selectedPerformanceRecord;
+
+    public string SelectedPerformanceSummary
+    {
+        get
+        {
+            var r = SelectedPerformanceRecord;
+            if (r is null) return "Select a setting to inspect local evidence.";
+            return $"{r.SettingName} ({r.SettingKey}) · tests={r.TestCount} (direct={r.DirectTestCount}, multi={r.AssociatedMultiSettingTestCount}) · " +
+                   $"latest={r.DisplayLatest} · confidence={r.DisplayConfidence} · {r.RecommendationSummary}";
+        }
+    }
+
+    public bool HasPerformanceEvidence => PerformanceEvidenceRows.Count > 0;
+
+    public SettingTestEvidence? SelectedPerformanceEvidenceA
+    {
+        get => _selectedPerformanceEvidenceA;
+        set { if (SetProperty(ref _selectedPerformanceEvidenceA, value)) RaiseCanExecutes(); }
+    }
+    private SettingTestEvidence? _selectedPerformanceEvidenceA;
+
+    public SettingTestEvidence? SelectedPerformanceEvidenceB
+    {
+        get => _selectedPerformanceEvidenceB;
+        set { if (SetProperty(ref _selectedPerformanceEvidenceB, value)) RaiseCanExecutes(); }
+    }
+    private SettingTestEvidence? _selectedPerformanceEvidenceB;
+
+    public string TargetedRestoreAssessmentText
+    {
+        get => _targetedRestoreAssessmentText;
+        set => SetProperty(ref _targetedRestoreAssessmentText, value ?? string.Empty);
+    }
+    private string _targetedRestoreAssessmentText =
+        "Targeted surgical restore is not executed in this phase. Full backup restore remains the safe path.";
 
     public bool IsGuidedRunning =>
         _guided.Status is not GuidedOptimizationStatus.Idle
@@ -866,6 +998,9 @@ public sealed class MainViewModel : ViewModelBase
         (DuplicateCustomSetCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (RenameCustomSetCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (ResetSelectedSettingViaBackupCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (RefreshPerformanceIntelCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (ComparePerformanceEvidenceCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (EvaluateTargetedRestoreCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
     }
 
     private async Task RefreshAsync()
@@ -922,6 +1057,7 @@ public sealed class MainViewModel : ViewModelBase
             await LoadGuidedHistoryAsync().ConfigureAwait(true);
             await RefreshCustomCatalogAsync().ConfigureAwait(true);
             await LoadCustomSetsAsync().ConfigureAwait(true);
+            await RefreshPerformanceIntelAsync().ConfigureAwait(true);
 
             _hasLoaded = true;
             RaisePropertyChanged(nameof(HasOptimizations));
@@ -1946,6 +2082,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 IsSelected = _customSelectedKeys.Contains(item.ConfigKey)
             };
+            row.ApplyPerformanceRecord(_perfIntel.GetRecord(item.ConfigKey));
             if (_customPendingValues.TryGetValue(item.ConfigKey, out var pending))
             {
                 row.SetPendingSilently(pending);
@@ -2125,6 +2262,8 @@ public sealed class MainViewModel : ViewModelBase
             await LoadGuidedHistoryAsync().ConfigureAwait(true);
             await LoadBenchmarkHistoryAsync().ConfigureAwait(true);
             await RefreshCustomCatalogAsync().ConfigureAwait(true);
+            _perfIntel.InvalidateCache();
+            await RefreshPerformanceIntelAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -2380,6 +2519,107 @@ public sealed class MainViewModel : ViewModelBase
         }
     }
 
+
+    private async Task RefreshPerformanceIntelAsync()
+    {
+        try
+        {
+            var index = await _perfIntel.GetIndexAsync(forceRebuild: true).ConfigureAwait(true);
+            PerformanceFingerprintSummary = index.CurrentFingerprint?.DisplaySummary
+                ?? "Fingerprint unavailable.";
+            PerformanceRecords.Clear();
+            foreach (var r in index.Records.Where(x => x.HasEvidence))
+            {
+                PerformanceRecords.Add(r);
+            }
+
+            if (index.Records.Count == 0 || index.Records.All(r => !r.HasEvidence))
+            {
+                GlobalRecommendationBlurb = "No local benchmark evidence yet.";
+            }
+            else
+            {
+                var withDirect = index.Records.Count(r => r.DirectTestCount > 0);
+                GlobalRecommendationBlurb =
+                    $"Based on your tests: {index.AllEvidence.Count} evidence row(s) across {withDirect} setting(s) with direct tests. " +
+                    "Heuristic only — not a guarantee. Single-setting evidence is stronger than multi-setting.";
+            }
+
+            PerformanceIntelStatus =
+                $"Built {index.BuiltAt.LocalDateTime:g} · {index.GuidedRunsAnalyzed} guided run(s) · {PerformanceRecords.Count} setting(s) with evidence · local only, no telemetry.";
+
+            // refresh custom rows with intel
+            ApplyCustomFilter();
+            RaisePropertyChanged(nameof(HasPerformanceRecords));
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning($"Performance intel refresh failed: {ex.Message}");
+            PerformanceIntelStatus = "Intelligence refresh failed: " + ex.Message;
+        }
+    }
+
+    private void BuildPerformanceMultiRunComparison()
+    {
+        PerformanceCompareRows.Clear();
+        var a = SelectedPerformanceEvidenceA;
+        var b = SelectedPerformanceEvidenceB;
+        if (a is null || b is null)
+        {
+            return;
+        }
+
+        var metrics = a.ComparisonRows.Select(r => r.Metric)
+            .Union(b.ComparisonRows.Select(r => r.Metric), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var metric in metrics)
+        {
+            var ra = a.ComparisonRows.FirstOrDefault(r => r.Metric.Equals(metric, StringComparison.OrdinalIgnoreCase));
+            var rb = b.ComparisonRows.FirstOrDefault(r => r.Metric.Equals(metric, StringComparison.OrdinalIgnoreCase));
+            PerformanceCompareRows.Add(new PerformanceRunCompareRow
+            {
+                Metric = metric,
+                RunALabel = a.TestedAt.LocalDateTime.ToString("g"),
+                RunBLabel = b.TestedAt.LocalDateTime.ToString("g"),
+                BeforeA = ra?.Before,
+                AfterA = ra?.After,
+                DeltaA = ra?.AbsoluteDifference,
+                BeforeB = rb?.Before,
+                AfterB = rb?.After,
+                DeltaB = rb?.AbsoluteDifference,
+                ClassificationA = a.Classification.ToString(),
+                ClassificationB = b.Classification.ToString(),
+                EvidenceTypeA = a.EvidenceType.ToString(),
+                EvidenceTypeB = b.EvidenceType.ToString()
+            });
+        }
+
+        StatusMessage = $"Compared two runs for {SelectedPerformanceRecord?.SettingKey ?? "setting"} (raw recorded values only).";
+    }
+
+    private async Task EvaluateTargetedRestoreAsync()
+    {
+        var key = _customSelectedKeys.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            TargetedRestoreAssessmentText = "Select a setting first.";
+            return;
+        }
+
+        try
+        {
+            var assessment = await _targetedRestore.EvaluateAsync(key).ConfigureAwait(true);
+            TargetedRestoreAssessmentText =
+                $"{assessment.Safety}: {assessment.Message} (PreferFullBackupRestore={assessment.PreferFullBackupRestore})";
+            StatusMessage = "Targeted restore assessment complete (no surgical restore executed).";
+        }
+        catch (Exception ex)
+        {
+            TargetedRestoreAssessmentText = ex.Message;
+        }
+    }
+
     private async Task LoadGuidedHistoryAsync()
     {
         try
@@ -2567,6 +2807,8 @@ public sealed class MainViewModel : ViewModelBase
             StatusMessage = $"Guided finished: {run.Status} / {run.Classification} / {run.UserDecision}";
             await LoadGuidedHistoryAsync().ConfigureAwait(true);
             await LoadBenchmarkHistoryAsync().ConfigureAwait(true);
+            _perfIntel.InvalidateCache();
+            await RefreshPerformanceIntelAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -2892,6 +3134,73 @@ public sealed class CustomOptimizationRowViewModel : ViewModelBase
 
     public string DistinctionHint =>
         $"Recommended: {RecommendedValue ?? "—"}  ·  Current: {CurrentValue ?? "—"}  ·  Target: {PendingValue}  ·  Impact: {ExpectedImpactLabel} (not measured)";
+
+    public bool HasLocalEvidence { get; private set; }
+    public string LastTestedDisplay { get; private set; } = string.Empty;
+    public string TestCountDisplay { get; private set; } = string.Empty;
+    public string LatestResultDisplay { get; private set; } = string.Empty;
+    public string ConfidenceDisplay { get; private set; } = string.Empty;
+    public string BasedOnYourTests { get; private set; } = "No local benchmark evidence yet.";
+
+    public void ApplyPerformanceRecord(SettingPerformanceRecord? record)
+    {
+        if (record is null || !record.HasEvidence)
+        {
+            HasLocalEvidence = false;
+            LastTestedDisplay = string.Empty;
+            TestCountDisplay = string.Empty;
+            LatestResultDisplay = string.Empty;
+            ConfidenceDisplay = string.Empty;
+            BasedOnYourTests = "No local benchmark evidence yet.";
+        }
+        else
+        {
+            HasLocalEvidence = true;
+            LastTestedDisplay = record.LastTestedAt?.LocalDateTime.ToString("g") ?? "—";
+            TestCountDisplay = $"{record.DirectTestCount} direct / {record.AssociatedMultiSettingTestCount} multi";
+            LatestResultDisplay = record.DisplayLatest;
+            ConfidenceDisplay = record.DisplayConfidence;
+            BasedOnYourTests = record.RecommendationSummary;
+        }
+
+        RaisePropertyChanged(nameof(HasLocalEvidence));
+        RaisePropertyChanged(nameof(LastTestedDisplay));
+        RaisePropertyChanged(nameof(TestCountDisplay));
+        RaisePropertyChanged(nameof(LatestResultDisplay));
+        RaisePropertyChanged(nameof(ConfidenceDisplay));
+        RaisePropertyChanged(nameof(BasedOnYourTests));
+        RaisePropertyChanged(nameof(IntelligenceHint));
+    }
+
+    public string IntelligenceHint =>
+        HasLocalEvidence
+            ? $"Based on your tests: {BasedOnYourTests} · Last {LastTestedDisplay} · {TestCountDisplay} · Latest {LatestResultDisplay} · Confidence {ConfidenceDisplay} (heuristic)"
+            : "Based on your tests: No local benchmark evidence yet.";
+}
+
+public sealed class PerformanceRunCompareRow
+{
+    public string Metric { get; init; } = string.Empty;
+    public string RunALabel { get; init; } = string.Empty;
+    public string RunBLabel { get; init; } = string.Empty;
+    public double? BeforeA { get; init; }
+    public double? AfterA { get; init; }
+    public double? DeltaA { get; init; }
+    public double? BeforeB { get; init; }
+    public double? AfterB { get; init; }
+    public double? DeltaB { get; init; }
+    public string ClassificationA { get; init; } = string.Empty;
+    public string ClassificationB { get; init; } = string.Empty;
+    public string EvidenceTypeA { get; init; } = string.Empty;
+    public string EvidenceTypeB { get; init; } = string.Empty;
+}
+
+public sealed class PerformanceTrendPoint
+{
+    public string Label { get; init; } = string.Empty;
+    public double Value { get; init; }
+    public string Classification { get; init; } = string.Empty;
+    public string EvidenceType { get; init; } = string.Empty;
 }
 
 public sealed class SettingRowViewModel : ViewModelBase

@@ -23,6 +23,7 @@ It analyzes your PC and CS2 installation, recommends **safe** optimizations, man
 - **Benchmark engine** — external OS-level session to compare system states (before/after). CPU, process CPU/memory, system memory; GPU util/temps and CS2 frame-time marked unavailable without injection. Local JSON history, A/B comparison, JSON/CSV export. **Does not guarantee FPS improvements.**
 - **Guided Optimize & Benchmark** — orchestrated baseline → preview → **explicit confirm** → backup → apply → verify → post-benchmark → compare → Keep|Restore. Uses the same settings apply path only. Local guided-run history. **No FPS guarantees.**
 - **Custom / individual optimization** — pick single or multiple supported CS2 settings (or a full profile). In-memory search/filter, custom sets, save-as-profile via existing profile system, guided A/B through Phase 5 service. **Recommended ≠ measured.**
+- **Performance intelligence** — learns only from **local** guided benchmark history. Per-setting records, confidence heuristics, single vs multi-setting evidence, system fingerprint (no PII). **No telemetry. No FPS guarantees.**
 - **Logging** — structured local logs; secrets redacted.
 - **UI** — dark WPF shell with loading/empty/error states and confirmation dialogs. Execution status warning when the managed cfg is not wired into autoexec. Benchmark page with live sample timeline. Optimize & Benchmark page with step progress and Keep/Restore. Custom Optimization picker page.
 
@@ -312,7 +313,64 @@ Custom selection → `GuidedTargetKind.SettingsMap` on existing `IGuidedOptimiza
 
 “Reset via backup” uses the existing FrameForge backup restore for managed cfg + autoexec. It is **not** a guaranteed single-key surgical restore; the UI states this honestly.
 
+## Performance intelligence (local only)
+
+FrameForge answers: *“What happened when this setting was tested on this PC?”* using **only** local guided-run history.
+
+### What it does **not** do
+
+- No cloud services, no telemetry upload  
+- No invented FPS values  
+- No claim of statistical certainty  
+- No guaranteed improvements  
+
+### System fingerprint
+
+Stable local hash of non-sensitive fields: CPU model, GPU model, RAM amount, OS version, architecture.  
+**Excluded:** username, email, Steam account, IP, serials, MAC, filesystem secrets. Missing fields → `unknown`.
+
+### Evidence types
+
+| Type | Meaning |
+|------|---------|
+| **SingleSetting** | Exactly one setting changed — may count as **direct** evidence |
+| **MultiSetting** | Several settings changed together — **associated only**; never treated as causal proof for each key |
+
+### Confidence (heuristic labels)
+
+Documented rules in `PerformanceConfidenceRules`:
+
+| Valid direct tests | Typical label |
+|--------------------|---------------|
+| 0 | **Unknown** |
+| 1 | **Low** |
+| 2–3 consistent | **Medium** |
+| 4+ consistent | **High** |
+| Conflicting improved/regressed | stays **Low** |
+
+Multi-setting evidence alone never raises confidence above Unknown. These are **not** scientific confidence intervals.
+
+### Storage
+
+```text
+%LocalAppData%/FrameForge/PerformanceHistory/index.json
+%LocalAppData%/FrameForge/PerformanceHistory/setting-change-snapshots.json
+```
+
+In-memory analysis cache; rebuild on guided history change or manual refresh — not on every UI repaint.
+
+### Per-key snapshot metadata
+
+When FrameForge applies managed settings, each key change is recorded (SettingId, Previous/New value, File, Timestamp, BackupId) **alongside** the existing full backup.  
+Targeted surgical restore is **assessed** (`SafeToTargetRestore` / `UnsafeToTargetRestore` / …) but **not executed** in the UI — full backup restore remains the safe path.
+
+### UI
+
+- **Custom Optimization** rows show Last tested / Tests / Latest / Confidence when evidence exists, plus “Based on your tests” blurbs  
+- **Performance History** page: fingerprint, per-setting aggregates, direct vs associated evidence, multi-run compare, simple trend of recorded CPU deltas  
+
 ## Not implemented yet (honest)
+
 
 - Automatic Windows power-plan / registry tweaks (advisory only)
 - Windows Game Mode status probe (score factor present, 0 points)
@@ -323,7 +381,7 @@ Custom selection → `GuidedTargetKind.SettingsMap` on existing `IGuidedOptimiza
 - **Automatic** Steam launch-option editing (manual recommendation only)
 - Binary / `video.txt` graphics quality sliders
 - Continuous / scheduled guided runs
-- True per-key surgical restore without full managed-cfg backup snapshot
+- Execute targeted per-key surgical restore in UI (assessment API exists; full backup remains default)
 - In-game overlay for live recommended vs measured comparison
 
 ## Tech stack
@@ -344,7 +402,7 @@ src/
   FrameForge.CS2              Steam / CS2 detect + cfg + settings + autoexec integration
   FrameForge.Optimization     Catalog, pipeline, score
   FrameForge.Benchmark        External benchmark engine + OS sampler
-  FrameForge.Infrastructure   DI, backup, profiles, logs, guided optimization, custom sets
+  FrameForge.Infrastructure   DI, backup, profiles, logs, guided, custom sets, performance intelligence
 tests/
   FrameForge.Tests
 assets/profiles/              Built-in profile JSON (schema v1)
