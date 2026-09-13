@@ -359,12 +359,14 @@ public sealed class PerformanceIntelligenceTests
         });
 
         // backup missing → InsufficientMetadata
-        var eval = new TargetedRestoreEvaluator(
+        var svc = new TargetedRestoreService(
             snapStore,
             new BackupService(env.Paths, env.Log),
             new StubSettings { Source = Cs2SettingSource.Autoexec, Value = "120" },
             new Cs2ConfigService(),
-            new Cs2SettingCatalog());
+            new Cs2SettingCatalog(),
+            env.Log);
+        var eval = new TargetedRestoreEvaluator(svc);
 
         var result = await eval.EvaluateAsync("fps_max");
         Assert.Equal(TargetedRestoreSafety.InsufficientMetadata, result.Safety);
@@ -402,7 +404,7 @@ public sealed class PerformanceIntelligenceTests
         var snapStore = new SettingChangeSnapshotStore(paths, log);
         await snapStore.AppendAsync(entry.SettingChangeSnapshots);
 
-        var eval = new TargetedRestoreEvaluator(
+        var svc = new TargetedRestoreService(
             snapStore,
             backups,
             new StubSettings
@@ -413,11 +415,13 @@ public sealed class PerformanceIntelligenceTests
                 Available = true
             },
             new Cs2ConfigService(),
-            new Cs2SettingCatalog());
+            new Cs2SettingCatalog(),
+            log);
+        var eval = new TargetedRestoreEvaluator(svc);
 
         var result = await eval.EvaluateAsync("fps_max");
         Assert.Equal(TargetedRestoreSafety.UnsafeToTargetRestore, result.Safety);
-        Assert.Contains("neither", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("differs from the last FrameForge-managed value", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -527,12 +531,13 @@ public sealed class PerformanceIntelligenceTests
         public Task SaveRun(GuidedOptimizationRun run) => Guided.SaveAsync(run);
 
         public TargetedRestoreEvaluator CreateEvaluator() =>
-            new(
+            new(new TargetedRestoreService(
                 new SettingChangeSnapshotStore(Paths, Log),
                 new BackupService(Paths, Log),
                 new StubSettings(),
                 new Cs2ConfigService(),
-                new Cs2SettingCatalog());
+                new Cs2SettingCatalog(),
+                Log));
     }
 
     private sealed class FixedHardware : IHardwareInfoService

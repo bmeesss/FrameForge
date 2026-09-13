@@ -24,6 +24,8 @@ It analyzes your PC and CS2 installation, recommends **safe** optimizations, man
 - **Guided Optimize & Benchmark** — orchestrated baseline → preview → **explicit confirm** → backup → apply → verify → post-benchmark → compare → Keep|Restore. Uses the same settings apply path only. Local guided-run history. **No FPS guarantees.**
 - **Custom / individual optimization** — pick single or multiple supported CS2 settings (or a full profile). In-memory search/filter, custom sets, save-as-profile via existing profile system, guided A/B through Phase 5 service. **Recommended ≠ measured.**
 - **Performance intelligence** — learns only from **local** guided benchmark history. Per-setting records, confidence heuristics, single vs multi-setting evidence, system fingerprint (no PII). **No telemetry. No FPS guarantees.**
+- **Safe targeted restore** — restores individual FrameForge-managed keys only when assessment proves safety; refuses user-changed values. Never silent full-backup fallback.
+- **One-click retest** — re-runs a single setting through the existing guided optimize & benchmark workflow from Performance History / Custom Optimization.
 - **Logging** — structured local logs; secrets redacted.
 - **UI** — dark WPF shell with loading/empty/error states and confirmation dialogs. Execution status warning when the managed cfg is not wired into autoexec. Benchmark page with live sample timeline. Optimize & Benchmark page with step progress and Keep/Restore. Custom Optimization picker page.
 
@@ -361,8 +363,34 @@ In-memory analysis cache; rebuild on guided history change or manual refresh —
 
 ### Per-key snapshot metadata
 
-When FrameForge applies managed settings, each key change is recorded (SettingId, Previous/New value, File, Timestamp, BackupId) **alongside** the existing full backup.  
-Targeted surgical restore is **assessed** (`SafeToTargetRestore` / `UnsafeToTargetRestore` / …) but **not executed** in the UI — full backup restore remains the safe path.
+When FrameForge applies managed settings, each key change is recorded (SettingId, Previous/New value, File, Timestamp, BackupId) **alongside** the existing full backup.
+
+### Safe targeted restore
+
+`ITargetedRestoreService` assesses then optionally restores **one key** inside `frameforge_settings.cfg`.
+
+| Assessment | Meaning |
+|------------|---------|
+| **SafeToTargetRestore** | Snapshot consistent; current managed value equals last FrameForge-applied value |
+| **UnsafeToTargetRestore** | Current value differs (user/external change) or path/ownership uncertain — **refused** |
+| **InsufficientEvidence** | Incomplete/corrupt snapshot metadata |
+| **NotTracked** | No snapshot for this setting |
+
+**Mandatory rule:** if the user later changes `fps_max` from the FrameForge-applied value, targeted restore **will not** overwrite it.
+
+Restore flow: Assess → refuse if unsafe → backup current managed file → write previous value for tracked key only → verify key + unrelated keys → record snapshot.  
+**Does not** silently fall back to full backup restore (that remains a separate Backups action).  
+**Does not** rewrite user autoexec content outside FRAMEFORGE markers.
+
+### One-click retest
+
+From Performance History or Custom Optimization: **Retest this setting** runs the existing guided pipeline (baseline → confirm → backup → apply target → post bench → keep/restore).  
+Target choices: Recommended / Previously tested / Custom — never silent.  
+After completion, intelligence cache rebuilds (new evidence, confidence, latest classification).
+
+### Fingerprint separation
+
+Evidence is tied to `SystemFingerprintId`. Hardware changes do **not** merge into one aggregate. UI defaults to **current system**; optional “all systems” filter labels other rows as *Different system fingerprint*.
 
 ### UI
 
@@ -381,7 +409,7 @@ Targeted surgical restore is **assessed** (`SafeToTargetRestore` / `UnsafeToTarg
 - **Automatic** Steam launch-option editing (manual recommendation only)
 - Binary / `video.txt` graphics quality sliders
 - Continuous / scheduled guided runs
-- Execute targeted per-key surgical restore in UI (assessment API exists; full backup remains default)
+- Bulk multi-setting targeted restore UX polish / progress UI
 - In-game overlay for live recommended vs measured comparison
 
 ## Tech stack

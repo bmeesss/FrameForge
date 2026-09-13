@@ -33,13 +33,16 @@ public enum PerformanceEvidenceType
 /// </summary>
 public enum TargetedRestoreSafety
 {
-    /// <summary>Enough metadata + managed-file ownership to attempt a future targeted restore.</summary>
+    /// <summary>Proven safe to surgically restore the previous FrameForge-managed value.</summary>
     SafeToTargetRestore,
 
-    /// <summary>Missing snapshot metadata or incomplete chain.</summary>
-    InsufficientMetadata,
+    /// <summary>Missing or incomplete snapshot metadata — not enough information.</summary>
+    InsufficientEvidence,
 
-    /// <summary>User/external edits outside FrameForge markers make surgical restore unsafe.</summary>
+    /// <summary>Back-compat alias used by Phase 7 tests/docs.</summary>
+    InsufficientMetadata = InsufficientEvidence,
+
+    /// <summary>User/external edits make surgical restore unsafe.</summary>
     UnsafeToTargetRestore,
 
     /// <summary>Setting not present in any FrameForge-managed change record.</summary>
@@ -147,6 +150,8 @@ public sealed class SettingPerformanceRecord
 
     public bool HasEvidence => TestCount > 0;
     public bool HasDirectEvidence => DirectTestCount > 0;
+    public bool IsCurrentSystem { get; set; } = true;
+    public string FingerprintLabel => IsCurrentSystem ? "Current system" : "Different system fingerprint";
 
     public string DisplayLatest =>
         LatestClassification?.ToString() ?? "—";
@@ -162,7 +167,10 @@ public sealed class PerformanceIntelligenceIndex
     public int SchemaVersion { get; set; } = PerformanceIntelligenceSchema.CurrentVersion;
     public DateTimeOffset BuiltAt { get; set; } = DateTimeOffset.UtcNow;
     public SystemFingerprint? CurrentFingerprint { get; set; }
+    public List<SystemFingerprint> KnownFingerprints { get; set; } = new();
     public List<SettingPerformanceRecord> Records { get; set; } = new();
+    /// <summary>Records for the current system fingerprint only.</summary>
+    public List<SettingPerformanceRecord> CurrentSystemRecords { get; set; } = new();
     public List<SettingTestEvidence> AllEvidence { get; set; } = new();
     public int GuidedRunsAnalyzed { get; set; }
     public string Notes { get; set; } =
@@ -198,14 +206,102 @@ public sealed class SettingChangeSnapshotStoreDocument
     public List<SettingChangeSnapshot> Entries { get; set; } = new();
 }
 
-/// <summary>Assessment for a future targeted restore (not executed in Phase 7 UI).</summary>
+/// <summary>Assessment for targeted (surgical) restore of one setting.</summary>
 public sealed class TargetedRestoreAssessment
 {
     public string ConfigKey { get; init; } = string.Empty;
+    public string? SettingId { get; init; }
+    public string? SettingName { get; init; }
     public TargetedRestoreSafety Safety { get; init; } = TargetedRestoreSafety.NotTracked;
     public string Message { get; init; } = string.Empty;
     public SettingChangeSnapshot? LatestSnapshot { get; init; }
+    public string? CurrentValue { get; init; }
+    public string? RestoreValue { get; init; }
+    public string? AppliedValue { get; init; }
+    public string? AffectedFile { get; init; }
     public bool PreferFullBackupRestore { get; init; } = true;
+    public bool CanRestore => Safety == TargetedRestoreSafety.SafeToTargetRestore;
+
+    public string UiHint => Safety switch
+    {
+        TargetedRestoreSafety.SafeToTargetRestore =>
+            "Restore to previous FrameForge-managed value.",
+        TargetedRestoreSafety.UnsafeToTargetRestore =>
+            "Restore unavailable because the current value was changed after FrameForge applied it (or ownership cannot be proven).",
+        TargetedRestoreSafety.NotTracked =>
+            "Not enough information to safely restore this setting (not tracked).",
+        _ =>
+            "Not enough information to safely restore this setting."
+    };
+}
+
+/// <summary>Result of executing a targeted restore (never silent full-backup fallback).</summary>
+public sealed class TargetedRestoreResult
+{
+    public bool Success { get; init; }
+    public string Message { get; init; } = string.Empty;
+    public string ConfigKey { get; init; } = string.Empty;
+    public TargetedRestoreSafety Safety { get; init; } = TargetedRestoreSafety.NotTracked;
+    public string? BackupId { get; init; }
+    public string? PreviousValue { get; init; }
+    public string? RestoredValue { get; init; }
+    public string? AffectedFile { get; init; }
+    public bool RolledBack { get; init; }
+    public bool Refused { get; init; }
+    public TargetedRestoreAssessment? Assessment { get; init; }
+
+    public static TargetedRestoreResult Ok(string key, string message, string? backupId, string? restored, string? file, TargetedRestoreAssessment assessment) => new()
+    {
+        Success = true,
+        Message = message,
+        ConfigKey = key,
+        Safety = TargetedRestoreSafety.SafeToTargetRestore,
+        BackupId = backupId,
+        RestoredValue = restored,
+        PreviousValue = assessment.CurrentValue,
+        AffectedFile = file,
+        Assessment = assessment
+    };
+
+    public static TargetedRestoreResult Refuse(TargetedRestoreAssessment assessment) => new()
+    {
+        Success = false,
+        Refused = true,
+        Message = assessment.Message,
+        ConfigKey = assessment.ConfigKey,
+        Safety = assessment.Safety,
+        Assessment = assessment,
+        AffectedFile = assessment.AffectedFile,
+        PreviousValue = assessment.CurrentValue,
+        RestoredValue = assessment.RestoreValue
+    };
+
+    public static TargetedRestoreResult Fail(string key, string message, string? backupId = null, bool rolledBack = false, TargetedRestoreAssessment? assessment = null) => new()
+    {
+        Success = false,
+        Message = message,
+        ConfigKey = key,
+        BackupId = backupId,
+        RolledBack = rolledBack,
+        Assessment = assessment,
+        Safety = assessment?.Safety ?? TargetedRestoreSafety.UnsafeToTargetRestore
+    };
+}
+
+public sealed class TargetedRestoreBatchResult
+{
+    public bool AllSucceeded => Results.Count > 0 && Results.All(r => r.Success);
+    public List<TargetedRestoreResult> Results { get; init; } = new();
+    public string Summary =>
+        $"{Results.Count(r => r.Success)} succeeded, {Results.Count(r => r.Refused)} refused, {Results.Count(r => !r.Success && !r.Refused)} failed.";
+}
+
+/// <summary>Target value source for one-click retest.</summary>
+public enum RetestTargetKind
+{
+    Recommended,
+    PreviouslyTested,
+    Custom
 }
 
 /// <summary>

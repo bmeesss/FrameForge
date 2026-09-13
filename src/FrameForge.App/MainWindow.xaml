@@ -835,7 +835,16 @@
                   <Button Content="Guided test selection" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding GuidedCustomSelectionCommand}" Margin="0,0,8,8" />
                   <Button Content="Quick test (1 setting)" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding QuickTestSingleSettingCommand}" Margin="0,0,8,8" />
                   <Button Content="Reset via backup" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ResetSelectedSettingViaBackupCommand}" Margin="0,0,8,8" />
+                  <Button Content="Assess targeted restore" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding EvaluateTargetedRestoreCommand}" Margin="0,0,8,8" />
+                  <Button Content="Restore Setting" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RestoreSettingCommand}" Margin="0,0,8,8" />
+                  <Button Content="Retest this setting" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RetestSettingCommand}" Margin="0,0,8,8" />
                 </WrapPanel>
+                <TextBlock Text="{Binding TargetedRestoreHint}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,4" />
+                <DockPanel Margin="0,0,0,8">
+                  <TextBlock Text="Retest target:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                  <ComboBox Width="160" ItemsSource="{Binding RetestTargetOptions}" SelectedItem="{Binding RetestTargetKind}" Margin="0,0,8,0" />
+                  <TextBox Text="{Binding RetestCustomValue, UpdateSourceTrigger=PropertyChanged}" Padding="4" ToolTip="Used when target is Custom Value" />
+                </DockPanel>
                 <TextBlock Text="{Binding CustomResetExplanation}" TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" />
                 <TextBlock FontWeight="SemiBold" Margin="0,4,0,4">Based on your tests</TextBlock>
                 <TextBlock Text="{Binding GlobalRecommendationBlurb}" TextWrapping="Wrap" Margin="0,0,0,8" />
@@ -891,7 +900,20 @@
                 <TextBlock Text="{Binding PerformanceFingerprintSummary}" TextWrapping="Wrap" Margin="0,0,0,8" />
                 <TextBlock Text="{Binding PerformanceIntelStatus}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8" />
                 <TextBlock Text="{Binding GlobalRecommendationBlurb}" TextWrapping="Wrap" Margin="0,0,0,8" />
-                <Button Content="Rebuild intelligence cache" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RefreshPerformanceIntelCommand}" HorizontalAlignment="Left" />
+                <CheckBox Content="Show all systems (do not mix silently — labels separate fingerprints)" IsChecked="{Binding ShowAllSystemFingerprints}" Margin="0,0,0,8" />
+                <Button Content="Rebuild intelligence cache" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RefreshPerformanceIntelCommand}" HorizontalAlignment="Left" Margin="0,0,0,8" />
+                <WrapPanel>
+                  <Button Content="Assess restore" Style="{StaticResource NavButtonStyle}" Command="{Binding EvaluateTargetedRestoreCommand}" Margin="0,0,8,4" Padding="8,4" />
+                  <Button Content="Restore Setting" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RestoreSettingCommand}" Margin="0,0,8,4" />
+                  <Button Content="Retest this setting" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RetestSettingCommand}" Margin="0,0,8,4" />
+                </WrapPanel>
+                <TextBlock Text="{Binding TargetedRestoreAssessmentText}" FontSize="12" TextWrapping="Wrap" Margin="0,8,0,0" />
+                <TextBlock Text="{Binding TargetedRestoreHint}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                <DockPanel Margin="0,8,0,0">
+                  <TextBlock Text="Retest target:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                  <ComboBox Width="160" ItemsSource="{Binding RetestTargetOptions}" SelectedItem="{Binding RetestTargetKind}" Margin="0,0,8,0" />
+                  <TextBox Text="{Binding RetestCustomValue, UpdateSourceTrigger=PropertyChanged}" Padding="4" MinWidth="100" />
+                </DockPanel>
               </StackPanel>
             </Border>
 
@@ -911,7 +933,8 @@
                             <Run Text=")" Foreground="{StaticResource TextSecondaryBrush}" />
                           </TextBlock>
                           <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}">
-                            <Run Text="Latest:" />
+                            <Run Text="{Binding FingerprintLabel}" FontWeight="SemiBold" />
+                            <Run Text=" · Latest:" />
                             <Run Text="{Binding DisplayLatest}" />
                             <Run Text=" · Confidence:" />
                             <Run Text="{Binding DisplayConfidence}" />

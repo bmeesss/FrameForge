@@ -29,6 +29,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly ICustomOptimizationSetStore _customSetStore;
     private readonly IPerformanceIntelligenceService _perfIntel;
     private readonly ITargetedRestoreEvaluator _targetedRestore;
+    private readonly ITargetedRestoreService _targetedRestoreService;
     private readonly IAppLog _log;
 
     private string _currentPage = "Home";
@@ -63,6 +64,7 @@ public sealed class MainViewModel : ViewModelBase
         ICustomOptimizationSetStore customSetStore,
         IPerformanceIntelligenceService perfIntel,
         ITargetedRestoreEvaluator targetedRestore,
+        ITargetedRestoreService targetedRestoreService,
         IAppLog log)
     {
         _dashboardService = dashboardService;
@@ -83,6 +85,7 @@ public sealed class MainViewModel : ViewModelBase
         _customSetStore = customSetStore;
         _perfIntel = perfIntel;
         _targetedRestore = targetedRestore;
+        _targetedRestoreService = targetedRestoreService;
         _log = log;
         _guided.StatusChanged += (_, _) =>
         {
@@ -239,7 +242,9 @@ public sealed class MainViewModel : ViewModelBase
         });
         ComparePerformanceEvidenceCommand = new RelayCommand(BuildPerformanceMultiRunComparison, () =>
             SelectedPerformanceRecord is not null && SelectedPerformanceEvidenceA is not null && SelectedPerformanceEvidenceB is not null);
-        EvaluateTargetedRestoreCommand = new AsyncRelayCommand(EvaluateTargetedRestoreAsync, () => !IsBusy && HasCustomSelection);
+        EvaluateTargetedRestoreCommand = new AsyncRelayCommand(EvaluateTargetedRestoreAsync, () => !IsBusy && (HasCustomSelection || SelectedPerformanceRecord is not null));
+        RestoreSettingCommand = new AsyncRelayCommand(RestoreSettingAsync, () => !IsBusy && CanTargetedRestore);
+        RetestSettingCommand = new AsyncRelayCommand(RetestSettingAsync, () => !IsGuidedRunning && !IsBenchmarkRunning && (HasCustomSelection || SelectedPerformanceRecord is not null));
     }
 
     public ObservableCollection<OptimizationListItem> Optimizations { get; } = new();
@@ -700,6 +705,10 @@ public sealed class MainViewModel : ViewModelBase
                 RaisePropertyChanged(nameof(SelectedPerformanceSummary));
                 RaisePropertyChanged(nameof(HasPerformanceEvidence));
                 RaiseCanExecutes();
+                if (value is not null)
+                {
+                    _ = AssessSelectedForRestoreAsync(value.SettingKey);
+                }
             }
         }
     }
@@ -738,7 +747,53 @@ public sealed class MainViewModel : ViewModelBase
         set => SetProperty(ref _targetedRestoreAssessmentText, value ?? string.Empty);
     }
     private string _targetedRestoreAssessmentText =
-        "Targeted surgical restore is not executed in this phase. Full backup restore remains the safe path.";
+        "Assess a setting to see if targeted restore is safe. Unsafe cases are refused — full backup restore is a separate action.";
+
+    public ICommand RestoreSettingCommand { get; }
+    public ICommand RetestSettingCommand { get; }
+
+    public bool CanTargetedRestore =>
+        _lastTargetedAssessment?.CanRestore == true;
+
+    public string TargetedRestoreHint =>
+        _lastTargetedAssessment?.UiHint
+        ?? "Select a setting and assess restore safety first.";
+
+    private TargetedRestoreAssessment? _lastTargetedAssessment;
+
+    public bool ShowAllSystemFingerprints
+    {
+        get => _showAllSystemFingerprints;
+        set
+        {
+            if (SetProperty(ref _showAllSystemFingerprints, value))
+            {
+                _ = RefreshPerformanceIntelAsync();
+            }
+        }
+    }
+    private bool _showAllSystemFingerprints;
+
+    public IReadOnlyList<string> RetestTargetOptions { get; } = new[]
+    {
+        "Recommended",
+        "Previously Tested",
+        "Custom Value"
+    };
+
+    public string RetestTargetKind
+    {
+        get => _retestTargetKind;
+        set => SetProperty(ref _retestTargetKind, value ?? "Recommended");
+    }
+    private string _retestTargetKind = "Recommended";
+
+    public string RetestCustomValue
+    {
+        get => _retestCustomValue;
+        set => SetProperty(ref _retestCustomValue, value ?? string.Empty);
+    }
+    private string _retestCustomValue = string.Empty;
 
     public bool IsGuidedRunning =>
         _guided.Status is not GuidedOptimizationStatus.Idle
@@ -1001,6 +1056,8 @@ public sealed class MainViewModel : ViewModelBase
         (RefreshPerformanceIntelCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (ComparePerformanceEvidenceCommand as RelayCommand)?.RaiseCanExecuteChanged();
         (EvaluateTargetedRestoreCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (RestoreSettingCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (RetestSettingCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
     }
 
     private async Task RefreshAsync()
@@ -2528,7 +2585,8 @@ public sealed class MainViewModel : ViewModelBase
             PerformanceFingerprintSummary = index.CurrentFingerprint?.DisplaySummary
                 ?? "Fingerprint unavailable.";
             PerformanceRecords.Clear();
-            foreach (var r in index.Records.Where(x => x.HasEvidence))
+            var source = ShowAllSystemFingerprints ? index.Records : index.Records.Where(r => r.IsCurrentSystem);
+            foreach (var r in source.Where(x => x.HasEvidence))
             {
                 PerformanceRecords.Add(r);
             }
@@ -2598,25 +2656,268 @@ public sealed class MainViewModel : ViewModelBase
         StatusMessage = $"Compared two runs for {SelectedPerformanceRecord?.SettingKey ?? "setting"} (raw recorded values only).";
     }
 
+    private string? ResolveTargetSettingKey()
+    {
+        if (SelectedPerformanceRecord is not null)
+        {
+            return SelectedPerformanceRecord.SettingKey;
+        }
+
+        if (_customSelectedKeys.Count == 1)
+        {
+            return _customSelectedKeys.First();
+        }
+
+        return _customSelectedKeys.FirstOrDefault();
+    }
+
+    private async Task AssessSelectedForRestoreAsync(string key)
+    {
+        try
+        {
+            var assessment = await _targetedRestoreService.AssessAsync(key).ConfigureAwait(true);
+            _lastTargetedAssessment = assessment;
+            TargetedRestoreAssessmentText = $"{assessment.Safety}: {assessment.Message}";
+            RaisePropertyChanged(nameof(CanTargetedRestore));
+            RaisePropertyChanged(nameof(TargetedRestoreHint));
+            RaiseCanExecutes();
+        }
+        catch (Exception ex)
+        {
+            TargetedRestoreAssessmentText = ex.Message;
+            _lastTargetedAssessment = null;
+            RaisePropertyChanged(nameof(CanTargetedRestore));
+            RaisePropertyChanged(nameof(TargetedRestoreHint));
+        }
+    }
+
     private async Task EvaluateTargetedRestoreAsync()
     {
-        var key = _customSelectedKeys.FirstOrDefault();
+        var key = ResolveTargetSettingKey();
         if (string.IsNullOrWhiteSpace(key))
         {
             TargetedRestoreAssessmentText = "Select a setting first.";
             return;
         }
 
+        await AssessSelectedForRestoreAsync(key).ConfigureAwait(true);
+        StatusMessage = CanTargetedRestore
+            ? "Targeted restore is available for this setting."
+            : "Targeted restore is not available — see reason. Full backup restore remains a separate action.";
+    }
+
+    private async Task RestoreSettingAsync()
+    {
+        var key = ResolveTargetSettingKey();
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            StatusMessage = "Select a setting first.";
+            return;
+        }
+
+        var assessment = await _targetedRestoreService.AssessAsync(key).ConfigureAwait(true);
+        _lastTargetedAssessment = assessment;
+        RaisePropertyChanged(nameof(CanTargetedRestore));
+        RaisePropertyChanged(nameof(TargetedRestoreHint));
+        TargetedRestoreAssessmentText = $"{assessment.Safety}: {assessment.Message}";
+
+        if (!assessment.CanRestore)
+        {
+            StatusMessage = "Targeted restore refused: " + assessment.UiHint;
+            MessageBox.Show(
+                assessment.Message + "
+
+Full backup restore is a separate explicit action on the Backups page.",
+                "Targeted restore unavailable",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            $"Restore setting?
+
+" +
+            $"Setting: {assessment.SettingName ?? key}
+" +
+            $"Current: {assessment.CurrentValue ?? "—"}
+" +
+            $"Restore to: {assessment.RestoreValue ?? "—"}
+" +
+            $"File: {assessment.AffectedFile ?? "—"}
+" +
+            $"Reason: {assessment.Message}
+
+" +
+            "A backup of the current managed file will be created first. " +
+            "This does not silently run a full backup restore.",
+            "Confirm targeted restore",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question,
+            MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            StatusMessage = "Targeted restore cancelled.";
+            return;
+        }
+
         try
         {
-            var assessment = await _targetedRestore.EvaluateAsync(key).ConfigureAwait(true);
-            TargetedRestoreAssessmentText =
-                $"{assessment.Safety}: {assessment.Message} (PreferFullBackupRestore={assessment.PreferFullBackupRestore})";
-            StatusMessage = "Targeted restore assessment complete (no surgical restore executed).";
+            IsBusy = true;
+            var result = await _targetedRestoreService.RestoreAsync(key).ConfigureAwait(true);
+            if (result.Success)
+            {
+                StatusMessage = result.Message;
+                await LoadCs2SettingsAsync().ConfigureAwait(true);
+                await RefreshCustomCatalogAsync().ConfigureAwait(true);
+                await AssessSelectedForRestoreAsync(key).ConfigureAwait(true);
+            }
+            else
+            {
+                ErrorMessage = result.Message;
+                StatusMessage = result.Refused ? "Restore refused." : "Restore failed.";
+                if (result.RolledBack)
+                {
+                    StatusMessage += " Recovered from pre-restore backup.";
+                }
+            }
         }
         catch (Exception ex)
         {
-            TargetedRestoreAssessmentText = ex.Message;
+            ErrorMessage = ex.Message;
+            StatusMessage = "Targeted restore failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+            RaiseCanExecutes();
+        }
+    }
+
+    private async Task RetestSettingAsync()
+    {
+        var key = ResolveTargetSettingKey();
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            StatusMessage = "Select exactly one setting to retest.";
+            return;
+        }
+
+        var item = _customCatalogItems.FirstOrDefault(i =>
+            i.ConfigKey.Equals(key, StringComparison.OrdinalIgnoreCase))
+            ?? _individualCatalog.GetByConfigKey(key, _cs2Snapshot);
+
+        if (item is null)
+        {
+            StatusMessage = $"Setting '{key}' not found in catalog.";
+            return;
+        }
+
+        string? targetValue = null;
+        var kind = RetestTargetKind;
+        if (kind.StartsWith("Previous", StringComparison.OrdinalIgnoreCase))
+        {
+            var evidence = _perfIntel.GetEvidenceForSetting(key, currentSystemOnly: true)
+                .FirstOrDefault(e => e.EvidenceType == PerformanceEvidenceType.SingleSetting &&
+                                     !string.IsNullOrWhiteSpace(e.AppliedValue));
+            targetValue = evidence?.AppliedValue;
+            if (string.IsNullOrWhiteSpace(targetValue))
+            {
+                StatusMessage = "No previously tested value recorded for this setting on the current system.";
+                return;
+            }
+        }
+        else if (kind.StartsWith("Custom", StringComparison.OrdinalIgnoreCase))
+        {
+            targetValue = string.IsNullOrWhiteSpace(RetestCustomValue)
+                ? (_customPendingValues.TryGetValue(key, out var p) ? p : null)
+                : RetestCustomValue.Trim();
+            if (string.IsNullOrWhiteSpace(targetValue))
+            {
+                StatusMessage = "Enter a custom value for retest.";
+                return;
+            }
+        }
+        else
+        {
+            targetValue = item.RecommendedValue ?? item.DefaultValue;
+            if (string.IsNullOrWhiteSpace(targetValue))
+            {
+                StatusMessage = "No recommended value available for this setting.";
+                return;
+            }
+        }
+
+        var confirm = MessageBox.Show(
+            $"Retest setting '{item.Name}' ({key})?
+
+" +
+            $"Target ({kind}): {targetValue}
+" +
+            $"Current: {item.CurrentValue ?? "—"}
+
+" +
+            "Uses the existing guided workflow:
+" +
+            "Baseline → Preview → Confirm → Backup → Apply → Verify → Post benchmark → Compare → Keep/Restore.
+
+" +
+            "No FPS guarantees. CS2 should already be running.",
+            "Retest setting",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question,
+            MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            StatusMessage = "Retest cancelled.";
+            return;
+        }
+
+        // Drive selection for guided path
+        _customSelectedKeys.Clear();
+        _customSelectedKeys.Add(key);
+        _customPendingValues[key] = targetValue!;
+        item.PendingValue = targetValue;
+        ApplyCustomFilter();
+        NotifyCustomSelectionChanged();
+
+        ErrorMessage = null;
+        GuidedProgressLines.Clear();
+        GuidedProgressPercent = 0;
+        CurrentPage = "Guided";
+        StatusMessage = $"Retesting {key}…";
+
+        try
+        {
+            var request = BuildCustomGuidedRequest(
+                previewOnly: false,
+                labelOverride: $"Retest {key} ({kind})");
+            // ensure desired map uses target
+            request.DesiredSettings[key] = targetValue!;
+
+            var run = await _guided.RunAsync(request).ConfigureAwait(true);
+            LastGuidedRun = run;
+            if (!string.IsNullOrWhiteSpace(run.Error) && run.Status == GuidedOptimizationStatus.Failed)
+            {
+                ErrorMessage = run.Error;
+            }
+
+            StatusMessage = $"Retest finished: {run.Status} / {run.Classification} / {run.UserDecision}";
+            await LoadGuidedHistoryAsync().ConfigureAwait(true);
+            await LoadBenchmarkHistoryAsync().ConfigureAwait(true);
+            _perfIntel.InvalidateCache();
+            await RefreshPerformanceIntelAsync().ConfigureAwait(true);
+            await RefreshCustomCatalogAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            StatusMessage = "Retest failed.";
+            _log.LogError("Retest failed.", ex);
+        }
+        finally
+        {
+            RaiseCanExecutes();
         }
     }
 

@@ -17,6 +17,7 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
     private readonly IBenchmarkStore _benchmarkStore;
     private readonly IBenchmarkCalculator _calculator;
     private readonly IGuidedOptimizationStore _store;
+    private readonly ISystemFingerprintService? _fingerprint;
     private readonly IAppLog _log;
 
     private readonly object _gate = new();
@@ -36,7 +37,8 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
         IBenchmarkStore benchmarkStore,
         IBenchmarkCalculator calculator,
         IGuidedOptimizationStore store,
-        IAppLog log)
+        IAppLog log,
+        ISystemFingerprintService? fingerprint = null)
     {
         _detection = detection;
         _processMonitor = processMonitor;
@@ -46,6 +48,7 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
         _benchmarkStore = benchmarkStore;
         _calculator = calculator;
         _store = store;
+        _fingerprint = fingerprint;
         _log = log;
     }
 
@@ -82,6 +85,7 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
     {
         ArgumentNullException.ThrowIfNull(request);
         var run = CreateRunShell(request);
+        await StampFingerprintAsync(run, cancellationToken).ConfigureAwait(false);
         run.PreviewOnly = true;
         SetCurrent(run);
         SetStatus(run, GuidedOptimizationStatus.Preparing, "Preparing preview…", 5);
@@ -172,6 +176,7 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
         }
 
         var run = CreateRunShell(request);
+        await StampFingerprintAsync(run, cancellationToken).ConfigureAwait(false);
         SetCurrent(run);
 
         try
@@ -574,6 +579,25 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
         return new Dictionary<string, string>(profile?.Settings ?? new(), StringComparer.OrdinalIgnoreCase);
     }
 
+
+
+    private async Task StampFingerprintAsync(GuidedOptimizationRun run, CancellationToken cancellationToken)
+    {
+        if (_fingerprint is null || !string.IsNullOrWhiteSpace(run.SystemFingerprintId))
+        {
+            return;
+        }
+
+        try
+        {
+            var fp = await _fingerprint.GetFingerprintAsync(cancellationToken).ConfigureAwait(false);
+            run.SystemFingerprintId = fp.FingerprintId;
+        }
+        catch
+        {
+            // non-fatal
+        }
+    }
 
     private static void StampSelectedSettings(GuidedOptimizationRun run, IReadOnlyDictionary<string, string> desired)
     {

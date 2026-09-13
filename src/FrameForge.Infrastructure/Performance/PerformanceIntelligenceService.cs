@@ -87,6 +87,10 @@ public sealed class PerformanceIntelligenceService : IPerformanceIntelligenceSer
                            !string.IsNullOrWhiteSpace(run.PostBenchmarkId) &&
                            (run.ComparisonRows?.Count ?? 0) > 0;
 
+            var runFp = !string.IsNullOrWhiteSpace(run.SystemFingerprintId)
+                ? run.SystemFingerprintId!
+                : fp.FingerprintId;
+
             foreach (var key in keys)
             {
                 var def = _catalog.GetByConfigKey(key) ?? _catalog.GetById(key);
@@ -103,7 +107,7 @@ public sealed class PerformanceIntelligenceService : IPerformanceIntelligenceSer
                     InitialBenchmarkId = run.InitialBenchmarkId,
                     PostBenchmarkId = run.PostBenchmarkId,
                     BackupId = run.BackupId,
-                    SystemFingerprintId = fp.FingerprintId,
+                    SystemFingerprintId = runFp,
                     AppliedValue = applied,
                     AllSettingKeysInRun = keys,
                     ComparisonRows = run.ComparisonRows?.ToList() ?? new List<GuidedComparisonRow>(),
@@ -114,14 +118,35 @@ public sealed class PerformanceIntelligenceService : IPerformanceIntelligenceSer
         }
 
         var records = BuildRecords(evidence, fp);
+        var ordered = records
+            .OrderByDescending(r => r.IsCurrentSystem)
+            .ThenBy(r => r.SettingName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var known = new List<SystemFingerprint> { fp };
+        foreach (var id in ordered.Select(r => r.SystemFingerprintId).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!id.Equals(fp.FingerprintId, StringComparison.OrdinalIgnoreCase))
+            {
+                known.Add(new SystemFingerprint
+                {
+                    FingerprintId = id,
+                    CpuModel = "previous-or-unknown",
+                    GpuModel = "previous-or-unknown",
+                    OsVersion = "previous-or-unknown",
+                    Architecture = "previous-or-unknown"
+                });
+            }
+        }
+
         var index = new PerformanceIntelligenceIndex
         {
             SchemaVersion = PerformanceIntelligenceSchema.CurrentVersion,
             BuiltAt = DateTimeOffset.UtcNow,
             CurrentFingerprint = fp,
-            Records = records
-                .OrderBy(r => r.SettingName, StringComparer.OrdinalIgnoreCase)
-                .ToList(),
+            KnownFingerprints = known,
+            Records = ordered,
+            CurrentSystemRecords = ordered.Where(r => r.IsCurrentSystem).ToList(),
             AllEvidence = evidence
                 .OrderByDescending(e => e.TestedAt)
                 .ToList(),
@@ -151,7 +176,7 @@ public sealed class PerformanceIntelligenceService : IPerformanceIntelligenceSer
         return index;
     }
 
-    public SettingPerformanceRecord? GetRecord(string settingKeyOrId)
+    public SettingPerformanceRecord? GetRecord(string settingKeyOrId, bool currentSystemOnly = true)
     {
         if (string.IsNullOrWhiteSpace(settingKeyOrId))
         {
@@ -169,42 +194,87 @@ public sealed class PerformanceIntelligenceService : IPerformanceIntelligenceSer
             return null;
         }
 
-        return cache.Records.FirstOrDefault(r =>
-            r.SettingKey.Equals(settingKeyOrId, StringComparison.OrdinalIgnoreCase) ||
-            r.SettingId.Equals(settingKeyOrId, StringComparison.OrdinalIgnoreCase));
+        var source = currentSystemOnly ? cache.CurrentSystemRecords.Concat(cache.Records.Where(r => r.IsCurrentSystem)) : cache.Records;
+        // prefer current-system match
+        return source.FirstOrDefault(r =>
+            (r.SettingKey.Equals(settingKeyOrId, StringComparison.OrdinalIgnoreCase) ||
+             r.SettingId.Equals(settingKeyOrId, StringComparison.OrdinalIgnoreCase)) &&
+            (!currentSystemOnly || r.IsCurrentSystem))
+            ?? (currentSystemOnly
+                ? null
+                : cache.Records.FirstOrDefault(r =>
+                    r.SettingKey.Equals(settingKeyOrId, StringComparison.OrdinalIgnoreCase) ||
+                    r.SettingId.Equals(settingKeyOrId, StringComparison.OrdinalIgnoreCase)));
     }
 
-    public IReadOnlyList<SettingPerformanceRecord> GetAllRecords()
+    public IReadOnlyList<SettingPerformanceRecord> GetAllRecords(bool currentSystemOnly = true)
     {
         lock (_gate)
         {
-            return _cache?.Records.ToList() ?? new List<SettingPerformanceRecord>();
+            if (_cache is null)
+            {
+                return Array.Empty<SettingPerformanceRecord>();
+            }
+
+            return currentSystemOnly
+                ? _cache.Records.Where(r => r.IsCurrentSystem).ToList()
+                : _cache.Records.ToList();
         }
     }
 
-    public IReadOnlyList<SettingTestEvidence> GetEvidenceForSetting(string settingKeyOrId)
+    public IReadOnlyList<SettingTestEvidence> GetEvidenceForSetting(string settingKeyOrId, bool currentSystemOnly = true)
     {
-        var record = GetRecord(settingKeyOrId);
-        if (record is null)
+        PerformanceIntelligenceIndex? cache;
+        lock (_gate) { cache = _cache; }
+        if (cache is null)
         {
             return Array.Empty<SettingTestEvidence>();
         }
 
-        return record.DirectEvidence
-            .Concat(record.AssociatedEvidence)
-            .OrderByDescending(e => e.TestedAt)
-            .ToList();
+        IEnumerable<SettingTestEvidence> q = cache.AllEvidence.Where(e =>
+            e.SettingKey.Equals(settingKeyOrId, StringComparison.OrdinalIgnoreCase) ||
+            e.SettingId.Equals(settingKeyOrId, StringComparison.OrdinalIgnoreCase));
+
+        if (currentSystemOnly && cache.CurrentFingerprint is not null)
+        {
+            var id = cache.CurrentFingerprint.FingerprintId;
+            q = q.Where(e =>
+                string.IsNullOrWhiteSpace(e.SystemFingerprintId) ||
+                e.SystemFingerprintId.Equals(id, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return q.OrderByDescending(e => e.TestedAt).ToList();
     }
 
-    public string GetRecommendationBlurb(string settingKeyOrId)
+    public string GetRecommendationBlurb(string settingKeyOrId, bool currentSystemOnly = true)
     {
-        var record = GetRecord(settingKeyOrId);
+        var record = GetRecord(settingKeyOrId, currentSystemOnly);
         if (record is null)
         {
             return "No local benchmark evidence yet.";
         }
 
         return record.RecommendationSummary;
+    }
+
+    public IReadOnlyList<SystemFingerprint> GetKnownFingerprints()
+    {
+        lock (_gate)
+        {
+            return _cache?.KnownFingerprints.ToList() ?? new List<SystemFingerprint>();
+        }
+    }
+
+    private sealed class KeyFpComparer : IEqualityComparer<(string Key, string Fp)>
+    {
+        public bool Equals((string Key, string Fp) x, (string Key, string Fp) y) =>
+            string.Equals(x.Key, y.Key, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(x.Fp, y.Fp, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode((string Key, string Fp) obj) =>
+            HashCode.Combine(
+                obj.Key?.ToLowerInvariant(),
+                obj.Fp?.ToLowerInvariant());
     }
 
     private static bool IsAnalyzable(GuidedOptimizationRun run)
@@ -259,7 +329,9 @@ public sealed class PerformanceIntelligenceService : IPerformanceIntelligenceSer
         List<SettingTestEvidence> evidence,
         SystemFingerprint fp)
     {
-        var groups = evidence.GroupBy(e => e.SettingKey, StringComparer.OrdinalIgnoreCase);
+        var groups = evidence.GroupBy(
+            e => (Key: e.SettingKey, Fp: e.SystemFingerprintId ?? "unknown"),
+            new KeyFpComparer());
         var list = new List<SettingPerformanceRecord>();
 
         foreach (var g in groups)
@@ -267,14 +339,17 @@ public sealed class PerformanceIntelligenceService : IPerformanceIntelligenceSer
             var items = g.OrderByDescending(e => e.TestedAt).ToList();
             var direct = items.Where(e => e.EvidenceType == PerformanceEvidenceType.SingleSetting).ToList();
             var multi = items.Where(e => e.EvidenceType == PerformanceEvidenceType.MultiSetting).ToList();
+            var fpId = items[0].SystemFingerprintId ?? "unknown";
+            var isCurrent = fpId.Equals(fp.FingerprintId, StringComparison.OrdinalIgnoreCase);
 
             var record = new SettingPerformanceRecord
             {
                 SettingId = items[0].SettingId,
                 SettingKey = items[0].SettingKey,
                 SettingName = items[0].SettingName,
-                SystemFingerprintId = fp.FingerprintId,
-                SystemFingerprint = fp,
+                SystemFingerprintId = fpId,
+                SystemFingerprint = isCurrent ? fp : new SystemFingerprint { FingerprintId = fpId, CpuModel = "previous", GpuModel = "previous", OsVersion = "previous", Architecture = "previous" },
+                IsCurrentSystem = isCurrent,
                 TestCount = items.Count,
                 DirectTestCount = direct.Count,
                 AssociatedMultiSettingTestCount = multi.Count,

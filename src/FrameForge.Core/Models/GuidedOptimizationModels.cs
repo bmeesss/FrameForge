@@ -142,6 +142,9 @@ public sealed class GuidedOptimizationRun
     /// <summary>Snapshot of desired key→value at start of run.</summary>
     public Dictionary<string, string> SelectedSettings { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Non-PII system fingerprint id at run time (Phase 8).</summary>
+    public string? SystemFingerprintId { get; set; }
+
     public string? InitialBenchmarkId { get; set; }
     public string? PostBenchmarkId { get; set; }
     public string? BackupId { get; set; }

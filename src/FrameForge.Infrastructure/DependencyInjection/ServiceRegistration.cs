@@ -51,6 +51,7 @@ public static class ServiceRegistration
         services.AddSingleton<ISystemFingerprintService, SystemFingerprintService>();
         services.AddSingleton<ISettingChangeSnapshotStore, SettingChangeSnapshotStore>();
         services.AddSingleton<IPerformanceIntelligenceService, PerformanceIntelligenceService>();
+        services.AddSingleton<ITargetedRestoreService, TargetedRestoreService>();
         services.AddSingleton<ITargetedRestoreEvaluator, TargetedRestoreEvaluator>();
         return services;
     }

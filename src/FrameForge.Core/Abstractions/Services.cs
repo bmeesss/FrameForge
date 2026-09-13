@@ -303,13 +303,16 @@ public interface IPerformanceIntelligenceService
 
     void InvalidateCache();
 
-    SettingPerformanceRecord? GetRecord(string settingKeyOrId);
+    /// <param name="currentSystemOnly">When true (default), only records matching the current fingerprint.</param>
+    SettingPerformanceRecord? GetRecord(string settingKeyOrId, bool currentSystemOnly = true);
 
-    IReadOnlyList<SettingPerformanceRecord> GetAllRecords();
+    IReadOnlyList<SettingPerformanceRecord> GetAllRecords(bool currentSystemOnly = true);
 
-    IReadOnlyList<SettingTestEvidence> GetEvidenceForSetting(string settingKeyOrId);
+    IReadOnlyList<SettingTestEvidence> GetEvidenceForSetting(string settingKeyOrId, bool currentSystemOnly = true);
 
-    string GetRecommendationBlurb(string settingKeyOrId);
+    string GetRecommendationBlurb(string settingKeyOrId, bool currentSystemOnly = true);
+
+    IReadOnlyList<SystemFingerprint> GetKnownFingerprints();
 }
 
 /// <summary>
@@ -324,12 +327,30 @@ public interface ISettingChangeSnapshotStore
 }
 
 /// <summary>
-/// Evaluates whether a targeted (surgical) restore would be safe.
-/// Does not perform the restore — full backup restore remains the safe UI path.
+/// Evaluates whether a targeted (surgical) restore would be safe (read-only).
 /// </summary>
 public interface ITargetedRestoreEvaluator
 {
     Task<TargetedRestoreAssessment> EvaluateAsync(
         string configKey,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Assesses and executes safe targeted restores of FrameForge-managed settings.
+/// Never silently falls back to full backup restore.
+/// </summary>
+public interface ITargetedRestoreService
+{
+    Task<TargetedRestoreAssessment> AssessAsync(
+        string settingIdOrKey,
+        CancellationToken cancellationToken = default);
+
+    Task<TargetedRestoreResult> RestoreAsync(
+        string settingIdOrKey,
+        CancellationToken cancellationToken = default);
+
+    Task<TargetedRestoreBatchResult> RestoreSetAsync(
+        IEnumerable<string> settingIdsOrKeys,
         CancellationToken cancellationToken = default);
 }
