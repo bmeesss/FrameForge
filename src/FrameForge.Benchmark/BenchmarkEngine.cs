@@ -20,6 +20,7 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
     private readonly IBenchmarkStore _store;
     private readonly IBenchmarkCalculator _calculator;
     private readonly IAppLog _log;
+    private readonly ISystemFingerprintService? _fingerprint;
 
     private readonly object _gate = new();
     private CancellationTokenSource? _runCts;
@@ -40,7 +41,8 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
         IAppSettingsService appSettings,
         IBenchmarkStore store,
         IBenchmarkCalculator calculator,
-        IAppLog log)
+        IAppLog log,
+        ISystemFingerprintService? fingerprint = null)
     {
         _sampler = sampler;
         _processMonitor = processMonitor;
@@ -52,6 +54,7 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
         _store = store;
         _calculator = calculator;
         _log = log;
+        _fingerprint = fingerprint;
     }
 
     public BenchmarkStatus Status
@@ -221,6 +224,21 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
                     run.Samples.LastOrDefault()?.Cs2ProcessPresent ?? false);
             }
 
+            // Integrity gate for runs that would be stored as Completed
+            if (run.Status == BenchmarkStatus.Completed)
+            {
+                var integrity = BenchmarkConditionRules.ValidateCompletedRun(run);
+                if (!integrity.IsValid)
+                {
+                    run.Status = BenchmarkStatus.Failed;
+                    run.Error = "Integrity validation failed: " + string.Join("; ", integrity.Issues);
+                    Status = BenchmarkStatus.Failed;
+                    PublishProgress(run, configuration, BenchmarkUiPhase.Failed, run.Error,
+                        run.DurationSecondsActual, false, false);
+                    _log.LogWarning(run.Error);
+                }
+            }
+
             try
             {
                 await _store.SaveAsync(run, CancellationToken.None).ConfigureAwait(false);
@@ -311,6 +329,9 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
 
     public BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after) =>
         _calculator.Compare(before, after);
+
+    public BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after, BenchmarkCompareOptions options) =>
+        _calculator.Compare(before, after, options);
 
     private async Task RunLoopAsync(
         BenchmarkRun run,
@@ -542,6 +563,21 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
 
         var proc = _processMonitor.TryGetCs2Process();
 
+        string? fingerprintId = null;
+        if (_fingerprint is not null)
+        {
+            try
+            {
+                var fp = await _fingerprint.GetFingerprintAsync(cancellationToken).ConfigureAwait(false);
+                fingerprintId = string.IsNullOrWhiteSpace(fp.FingerprintId) ? null : fp.FingerprintId;
+            }
+            catch (Exception ex)
+            {
+                _log.LogDebug($"System fingerprint unavailable (non-fatal): {ex.Message}");
+                fingerprintId = null;
+            }
+        }
+
         return new BenchmarkSystemSnapshot
         {
             CpuName = hw.CpuName,
@@ -565,6 +601,7 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
             ActiveProfileId = profileId,
             ActiveProfileName = profileName,
             ActiveFrameForgeSettings = settingsMap,
+            SystemFingerprintId = fingerprintId,
             CapturedAt = DateTimeOffset.UtcNow
         };
     }

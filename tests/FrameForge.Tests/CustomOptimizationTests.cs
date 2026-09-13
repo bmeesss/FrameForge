@@ -633,6 +633,8 @@ public sealed class CustomOptimizationTests
         public void RequestCancel() { }
         public BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after) =>
             new FrameForge.Benchmark.BenchmarkCalculator().Compare(before, after);
+        public BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after, BenchmarkCompareOptions options) =>
+            new FrameForge.Benchmark.BenchmarkCalculator().Compare(before, after, options);
     }
 
     private sealed class InMemBenchStore : IBenchmarkStore

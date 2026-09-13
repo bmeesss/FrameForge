@@ -230,6 +230,7 @@ public interface IBenchmarkEngine
     void RequestStop();
     void RequestCancel();
     BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after);
+    BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after, BenchmarkCompareOptions options);
 }
 
 /// <summary>Pure calculation helpers exposed for tests and the engine.</summary>
@@ -237,6 +238,7 @@ public interface IBenchmarkCalculator
 {
     BenchmarkResult Calculate(IReadOnlyList<BenchmarkSample> samples);
     BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after);
+    BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after, BenchmarkCompareOptions options);
 }
 
 /// <summary>

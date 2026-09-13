@@ -142,8 +142,20 @@ public sealed class GuidedOptimizationRun
     /// <summary>Snapshot of desired key→value at start of run.</summary>
     public Dictionary<string, string> SelectedSettings { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Non-PII system fingerprint id at run time (Phase 8).</summary>
+    /// <summary>Non-PII system fingerprint id at run time (Phase 8). Prefer benchmark snapshots when present.</summary>
     public string? SystemFingerprintId { get; set; }
+
+    /// <summary>Fingerprint from baseline benchmark snapshot (source of truth).</summary>
+    public string? BaselineFingerprintId { get; set; }
+
+    /// <summary>Fingerprint from post-optimization benchmark snapshot (source of truth).</summary>
+    public string? PostFingerprintId { get; set; }
+
+    /// <summary>Condition match report for baseline vs post (Phase 11).</summary>
+    public BenchmarkConditionReport? ConditionReport { get; set; }
+
+    /// <summary>User forced comparison despite severe mismatch.</summary>
+    public bool ForcedCompareDespiteMismatch { get; set; }
 
     public string? InitialBenchmarkId { get; set; }
     public string? PostBenchmarkId { get; set; }

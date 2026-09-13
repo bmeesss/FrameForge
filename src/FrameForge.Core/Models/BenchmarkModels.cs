@@ -279,6 +279,9 @@ public sealed class BenchmarkRun
     public List<BenchmarkSample> Samples { get; set; } = new();
     public string? FilePath { get; set; }
 
+    /// <summary>Convenience mirror of SystemInformation.SystemFingerprintId (may be null).</summary>
+    public string? SystemFingerprintId => SystemInformation?.SystemFingerprintId;
+
     public string DisplayTitle =>
         $"{StartedAt.LocalDateTime:yyyy-MM-dd HH:mm} · {Configuration.ProfileName ?? Configuration.ProfileId ?? "no profile"} · {Configuration.DurationSeconds}s";
 }
@@ -314,6 +317,8 @@ public sealed class BenchmarkComparison
     public BenchmarkRun RunB { get; init; } = new();
     public IReadOnlyList<BenchmarkComparisonMetric> Metrics { get; init; } = Array.Empty<BenchmarkComparisonMetric>();
     public IReadOnlyList<BenchmarkConditionWarning> ConditionWarnings { get; init; } = Array.Empty<BenchmarkConditionWarning>();
+    public BenchmarkConditionReport? ConditionReport { get; init; }
+    public bool ForcedDespiteMismatch { get; init; }
     public string Summary { get; init; } = string.Empty;
 }
 

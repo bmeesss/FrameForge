@@ -414,16 +414,48 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
             var before = await _benchmarkStore.GetAsync(baseline.Id, linked.Token).ConfigureAwait(false) ?? baseline;
             var after = await _benchmarkStore.GetAsync(post.Id, linked.Token).ConfigureAwait(false) ?? post;
 
-            run.ConditionWarnings = BuildConditionWarnings(before, after).ToList();
+            // Fingerprints from benchmark snapshots (source of truth — do not recompute)
+            run.BaselineFingerprintId = before.SystemInformation?.SystemFingerprintId;
+            run.PostFingerprintId = after.SystemInformation?.SystemFingerprintId;
+            if (string.IsNullOrWhiteSpace(run.SystemFingerprintId))
+            {
+                run.SystemFingerprintId = run.BaselineFingerprintId ?? run.PostFingerprintId;
+            }
+
+            var conditionReport = BenchmarkConditionRules.Analyze(before, after, forcedDespiteMismatch: false);
+            run.ConditionReport = conditionReport;
+            run.ConditionWarnings = conditionReport.Warnings.Count > 0
+                ? conditionReport.Warnings.Select(w => new GuidedConditionWarning
+                {
+                    Code = w.Code,
+                    Message = w.Message,
+                    IsBlocking = w.IsBlocking
+                }).ToList()
+                : BuildConditionWarnings(before, after).ToList();
+
             var comparison = _calculator.Compare(before, after);
             run.Comparison = comparison;
             run.ComparisonRows = BuildRows(comparison).ToList();
-            run.Classification = GuidedClassificationRules.Classify(run.ComparisonRows, out var reason);
-            run.ClassificationReason = reason;
+            var provisional = GuidedClassificationRules.Classify(run.ComparisonRows, out var reason);
+            run.Classification = BenchmarkConditionRules.ApplyClassificationGate(
+                provisional, conditionReport, out var gateSuffix);
+            run.ClassificationReason = reason + gateSuffix;
 
-            if (run.ConditionWarnings.Any(w => !w.IsBlocking))
+            if (conditionReport.HasSevereMismatch)
             {
-                Report(run, "Comparison may not be reliable because system conditions changed.");
+                Report(run,
+                    "Severe condition mismatch — classification is Inconclusive unless the user forces compare. " +
+                    conditionReport.Summary);
+            }
+            else if (conditionReport.OverallStatus == ConditionMatchStatus.Warning)
+            {
+                Report(run, "Comparison may not be reliable because system conditions changed. Reliability: " +
+                            conditionReport.Reliability);
+            }
+            else
+            {
+                Report(run, "Condition match: " + conditionReport.OverallStatus +
+                            " · Reliability: " + conditionReport.Reliability + " (not statistical).");
             }
 
             // ── Await keep / restore ────────────────────────────────────

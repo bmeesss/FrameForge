@@ -213,6 +213,7 @@ public sealed class MainViewModel : ViewModelBase
         }, () => IsBenchmarkRunning);
         RefreshBenchmarkHistoryCommand = new AsyncRelayCommand(LoadBenchmarkHistoryAsync, () => !IsBusy);
         CompareBenchmarksCommand = new RelayCommand(CompareSelectedBenchmarks, () => SelectedBenchmarkA is not null && SelectedBenchmarkB is not null);
+        ForceCompareBenchmarksCommand = new RelayCommand(() => CompareSelectedBenchmarks(force: true), () => CanForceCompare && SelectedBenchmarkA is not null && SelectedBenchmarkB is not null);
         ExportBenchmarkJsonCommand = new AsyncRelayCommand(ExportBenchmarkJsonAsync, () => SelectedBenchmarkA is not null);
         ExportBenchmarkCsvCommand = new AsyncRelayCommand(ExportBenchmarkCsvAsync, () => SelectedBenchmarkA is not null);
         DeleteBenchmarkCommand = new AsyncRelayCommand(DeleteSelectedBenchmarkAsync, () => SelectedBenchmarkA is not null && !IsBenchmarkRunning);
@@ -301,6 +302,7 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<BenchmarkComparisonMetric> BenchmarkComparisonRows { get; } = new();
     public ObservableCollection<BenchmarkComparisonDisplayRow> BenchmarkComparisonDisplayRows { get; } = new();
     public ObservableCollection<BenchmarkConditionWarning> BenchmarkConditionWarnings { get; } = new();
+    public ObservableCollection<ConditionFieldResult> BenchmarkConditionFields { get; } = new();
     public ObservableCollection<string> ImportPreviewLines { get; } = new();
     public ObservableCollection<GuidedOptimizationRun> GuidedHistory { get; } = new();
     public ObservableCollection<GuidedComparisonRow> GuidedComparisonRows { get; } = new();
@@ -949,7 +951,27 @@ public sealed class MainViewModel : ViewModelBase
     }
     private string _benchmarkConditionWarningsSummary = string.Empty;
 
-    public bool HasBenchmarkConditionWarnings => BenchmarkConditionWarnings.Count > 0;
+    public bool HasBenchmarkConditionFields => BenchmarkConditionFields.Count > 0;
+    public bool HasBenchmarkConditionWarnings => BenchmarkConditionWarnings.Count > 0 || HasBenchmarkConditionFields;
+
+    public string ComparisonReliabilityText
+    {
+        get => _comparisonReliabilityText;
+        set => SetProperty(ref _comparisonReliabilityText, value ?? string.Empty);
+    }
+    private string _comparisonReliabilityText = string.Empty;
+
+    public string ConditionMatchOverallText
+    {
+        get => _conditionMatchOverallText;
+        set => SetProperty(ref _conditionMatchOverallText, value ?? string.Empty);
+    }
+    private string _conditionMatchOverallText = string.Empty;
+
+    public bool CanForceCompare => _lastConditionReport?.HasSevereMismatch == true && !IsBusy;
+    private BenchmarkConditionReport? _lastConditionReport;
+
+    public ICommand ForceCompareBenchmarksCommand { get; private set; } = null!;
 
     public string TargetedRestoreAssessmentText
     {
@@ -3639,7 +3661,7 @@ Full backup restore is a separate explicit action on the Backups page.",
         }
     }
 
-    private async Task ConfirmImportAsync(IntelligenceImportMode mode)
+    private async Task ConfirmImportAsync(IntelligenceImportMode? preferredMode)
     {
         if (ImportPreview is not { IsValid: true, SourcePath: not null and not "" })
         {
@@ -3648,24 +3670,41 @@ Full backup restore is a separate explicit action on the Backups page.",
         }
 
         var path = ImportPreview.SourcePath;
-        var confirm = MessageBox.Show(
-            mode == IntelligenceImportMode.Merge
-                ? "Merge imported history into local intelligence? Fingerprints stay separate."
-                : "Import as new history entries? Fingerprints stay separate.",
-            "Confirm import",
-            MessageBoxButton.OKCancel,
-            MessageBoxImage.Question,
-            MessageBoxResult.Cancel);
-        if (confirm != MessageBoxResult.OK)
+        var state = new ImportConfirmDialogState
         {
-            StatusMessage = "Import not confirmed.";
+            Title = "Confirm import — Cancel is default",
+            SourcePath = path,
+            PackageKind = ImportPreview.PackageKind,
+            Summary = ImportPreview.SummaryText + "\n" + (ImportPreview.Message ?? string.Empty),
+            ConflictLines = ImportPreview.ConflictDetails.Count > 0
+                ? ImportPreview.ConflictDetails.ToList()
+                : new List<string> { "(no conflicts listed)" },
+            FingerprintLines = ImportPreview.DifferentFingerprints.Count > 0
+                ? ImportPreview.DifferentFingerprints.Select(f => "Different system: " + f).ToList()
+                : new List<string> { "No foreign fingerprints (or unlabeled)." },
+            InvalidLines = ImportPreview.Errors.Count > 0
+                ? ImportPreview.Errors.ToList()
+                : new List<string> { "(none)" },
+            RecordsToAdd = ImportPreview.NewRecords,
+            RecordsToUpdate = ImportPreview.ExistingConflicts,
+            EvidenceToAdd = ImportPreview.DirectEvidence + ImportPreview.MultiSettingEvidence,
+            SnapshotsToAdd = ImportPreview.SnapshotsTotal,
+            CanMerge = true,
+            CanImportAsNew = true,
+            ChosenMode = preferredMode // pre-select intent; dialog still requires button
+        };
+
+        var mode = ShowImportConfirmDialog(state);
+        if (mode is null)
+        {
+            StatusMessage = "Import cancelled.";
             return;
         }
 
         try
         {
             IsBusy = true;
-            var result = await _intelExport.ImportAsync(path, mode).ConfigureAwait(true);
+            var result = await _intelExport.ImportAsync(path, mode.Value).ConfigureAwait(true);
             if (!result.Success)
             {
                 ErrorMessage = result.Message;
@@ -3685,6 +3724,49 @@ Full backup restore is a separate explicit action on the Backups page.",
         {
             IsBusy = false;
         }
+    }
+
+    /// <summary>
+    /// Shows the WPF import modal when available; falls back to MessageBox on non-WPF hosts.
+    /// Default result is always Cancel (null).
+    /// </summary>
+    private static IntelligenceImportMode? ShowImportConfirmDialog(ImportConfirmDialogState state)
+    {
+#if FRAMEFORGE_WPF_STUB
+        // Test / Linux stub: model-only — treat preferred mode as still needing "confirm" via null default
+        return null;
+#else
+        try
+        {
+            var dlg = new Dialogs.ImportConfirmDialog(state)
+            {
+                Owner = System.Windows.Application.Current?.MainWindow
+            };
+            var ok = dlg.ShowDialog();
+            if (ok != true)
+            {
+                return null;
+            }
+
+            return state.ChosenMode;
+        }
+        catch
+        {
+            // Fallback if dialog resources missing
+            var r = MessageBox.Show(
+                state.Summary + "\n\nOK = Merge, No = Import as new, Cancel = abort",
+                state.Title,
+                MessageBoxButton.YesNoCancel,
+                MessageBoxImage.Question,
+                MessageBoxResult.Cancel);
+            return r switch
+            {
+                MessageBoxResult.Yes => IntelligenceImportMode.Merge,
+                MessageBoxResult.No => IntelligenceImportMode.ImportAsNew,
+                _ => null
+            };
+        }
+#endif
     }
 
 
@@ -3753,7 +3835,9 @@ Full backup restore is a separate explicit action on the Backups page.",
         }
     }
 
-    private void CompareSelectedBenchmarks()
+    private void CompareSelectedBenchmarks() => CompareSelectedBenchmarks(force: false);
+
+    private void CompareSelectedBenchmarks(bool force)
     {
         if (SelectedBenchmarkA is null || SelectedBenchmarkB is null)
         {
@@ -3761,8 +3845,29 @@ Full backup restore is a separate explicit action on the Backups page.",
             return;
         }
 
-        var comparison = _benchmarkEngine.Compare(SelectedBenchmarkA, SelectedBenchmarkB);
-        var report = BenchmarkComparisonPresenter.Build(
+        var options = new BenchmarkCompareOptions { ForceCompareDespiteSevereMismatch = force };
+        if (force)
+        {
+            var confirm = MessageBox.Show(
+                "Severe condition mismatch detected.\n\nCompare anyway? Results will still show: " +
+                "\"Comparison performed despite condition mismatch.\"\n\nImproved/Regressed automatic claims remain blocked.",
+                "Force comparison",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Warning,
+                MessageBoxResult.Cancel);
+            if (confirm != MessageBoxResult.OK)
+            {
+                StatusMessage = "Forced comparison cancelled.";
+                return;
+            }
+        }
+
+        var comparison = _benchmarkEngine.Compare(SelectedBenchmarkA, SelectedBenchmarkB, options);
+        var condition = comparison.ConditionReport
+            ?? BenchmarkConditionRules.Analyze(SelectedBenchmarkA, SelectedBenchmarkB, force);
+        _lastConditionReport = condition;
+
+        var display = BenchmarkComparisonPresenter.Build(
             comparison,
             SelectedBenchmarkA.SystemInformation.SystemFingerprintId,
             SelectedBenchmarkB.SystemInformation.SystemFingerprintId);
@@ -3770,41 +3875,57 @@ Full backup restore is a separate explicit action on the Backups page.",
         BenchmarkComparisonRows.Clear();
         BenchmarkComparisonDisplayRows.Clear();
         BenchmarkConditionWarnings.Clear();
+        BenchmarkConditionFields.Clear();
+
         foreach (var m in comparison.Metrics)
         {
             BenchmarkComparisonRows.Add(m);
         }
 
-        foreach (var r in report.Rows)
+        foreach (var r in display.Rows)
         {
             BenchmarkComparisonDisplayRows.Add(r);
         }
 
-        foreach (var w in report.ConditionWarnings)
+        foreach (var f in condition.Fields)
+        {
+            BenchmarkConditionFields.Add(f);
+        }
+
+        foreach (var w in condition.Warnings)
         {
             BenchmarkConditionWarnings.Add(w);
         }
 
-        // Prefer calculator warnings if already populated
-        if (comparison.ConditionWarnings.Count > 0 && BenchmarkConditionWarnings.Count == 0)
-        {
-            foreach (var w in comparison.ConditionWarnings)
-            {
-                BenchmarkConditionWarnings.Add(w);
-            }
-        }
-
-        BenchmarkConditionWarningsSummary = BenchmarkConditionWarnings.Count == 0
-            ? "No condition mismatches detected."
-            : string.Join(" · ", BenchmarkConditionWarnings.Select(w => w.Message).Take(6));
+        ConditionMatchOverallText = $"Overall: {condition.OverallStatus}";
+        ComparisonReliabilityText =
+            $"Comparison reliability: {condition.Reliability} — {condition.ReliabilityReason}";
+        BenchmarkConditionWarningsSummary = condition.Summary +
+            (condition.ForcedDespiteMismatch ? " " + condition.ForcedNote : string.Empty);
         RaisePropertyChanged(nameof(HasBenchmarkConditionWarnings));
+        RaisePropertyChanged(nameof(HasBenchmarkConditionFields));
+        RaisePropertyChanged(nameof(CanForceCompare));
+        (ForceCompareBenchmarksCommand as RelayCommand)?.RaiseCanExecuteChanged();
 
-        BenchmarkComparisonSummary = report.Summary +
+        BenchmarkComparisonSummary = comparison.Summary +
             " A=" + SelectedBenchmarkA.DisplayTitle + " · B=" + SelectedBenchmarkB.DisplayTitle;
         RaisePropertyChanged(nameof(HasBenchmarkComparison));
-        StatusMessage = BenchmarkConditionWarnings.Count > 0
-            ? "Comparison ready — condition warnings present."
-            : "Comparison ready.";
+
+        if (condition.HasSevereMismatch && !force)
+        {
+            StatusMessage =
+                "Severe mismatch — metrics shown; use Compare anyway for forced note. Automatic Improved/Regressed blocked in guided runs.";
+        }
+        else if (condition.ForcedDespiteMismatch)
+        {
+            StatusMessage = "Comparison performed despite condition mismatch.";
+        }
+        else
+        {
+            StatusMessage = condition.OverallStatus == ConditionMatchStatus.Match
+                ? "Comparison ready — conditions match."
+                : "Comparison ready — see condition panel.";
+        }
     }
 
     private async Task ExportBenchmarkJsonAsync()

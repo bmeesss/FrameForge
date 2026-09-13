@@ -862,6 +862,8 @@ public sealed class Phase9UxAndReliabilityTests
         public void RequestCancel() { }
         public BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after) =>
             new BenchmarkCalculator().Compare(before, after);
+        public BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after, BenchmarkCompareOptions options) =>
+            new BenchmarkCalculator().Compare(before, after, options);
     }
 
     private sealed class InMemBenchStore : IBenchmarkStore

@@ -596,21 +596,39 @@
                     AutomationProperties.Name="Benchmark comparison results">
               <StackPanel>
                 <TextBlock Text="{Binding BenchmarkComparisonSummary}" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,8" />
-                <TextBlock Text="Condition warnings" FontWeight="SemiBold" Margin="0,0,0,4"
-                           Visibility="{Binding HasBenchmarkConditionWarnings, Converter={StaticResource BoolToVisibilityConverter}}" />
-                <TextBlock Text="{Binding BenchmarkConditionWarningsSummary}" TextWrapping="Wrap" Margin="0,0,0,8"
-                           Foreground="{StaticResource WarningBrush}"
-                           Visibility="{Binding HasBenchmarkConditionWarnings, Converter={StaticResource BoolToVisibilityConverter}}"
-                           AutomationProperties.Name="Benchmark condition warnings" />
-                <ItemsControl ItemsSource="{Binding BenchmarkConditionWarnings}" Margin="0,0,0,8"
-                              Visibility="{Binding HasBenchmarkConditionWarnings, Converter={StaticResource BoolToVisibilityConverter}}">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                      <TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontSize="12" Margin="0,2"
-                                 Foreground="{StaticResource WarningBrush}" />
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                <Border Background="{StaticResource BgSecondaryBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,12"
+                        AutomationProperties.Name="Benchmark condition match panel">
+                  <StackPanel>
+                    <TextBlock Text="Condition match" FontWeight="SemiBold" Margin="0,0,0,4" />
+                    <TextBlock Text="{Binding ConditionMatchOverallText}" Margin="0,0,0,4" />
+                    <TextBlock Text="{Binding ComparisonReliabilityText}" TextWrapping="Wrap" FontSize="12"
+                               Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" />
+                    <TextBlock Text="{Binding BenchmarkConditionWarningsSummary}" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Foreground="{StaticResource WarningBrush}" />
+                    <ItemsControl ItemsSource="{Binding BenchmarkConditionFields}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="2*" />
+                              <ColumnDefinition Width="*" />
+                              <ColumnDefinition Width="3*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding DisplayName}" />
+                            <TextBlock Grid.Column="1" Text="{Binding Status}" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="2" Text="{Binding Message}" TextWrapping="Wrap" FontSize="11"
+                                       Foreground="{StaticResource TextSecondaryBrush}" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Button Content="Compare anyway" Style="{StaticResource NavButtonStyle}" Padding="8,4" Margin="0,8,0,0"
+                            HorizontalAlignment="Left"
+                            Command="{Binding ForceCompareBenchmarksCommand}"
+                            ToolTip="Requires confirmation on SevereMismatch. Still states comparison was forced."
+                            AutomationProperties.Name="Force compare despite severe mismatch" />
+                  </StackPanel>
+                </Border>
                 <Grid Margin="0,0,0,6">
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="2*" />
@@ -647,7 +665,7 @@
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
                 <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,8,0,0"
-                           Text="Unavailable metrics show the word Unavailable — never zero. Comparison is not blocked by condition warnings." />
+                           Text="Unavailable metrics show Unavailable — never zero. Reliability is a heuristic, not statistical confidence. GPU utilization remains Unavailable (no PDH in this build)." />
               </StackPanel>
             </Border>
           </StackPanel>

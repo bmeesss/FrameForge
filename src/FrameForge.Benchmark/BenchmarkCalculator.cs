@@ -106,10 +106,17 @@ public sealed class BenchmarkCalculator : IBenchmarkCalculator
         };
     }
 
-    public BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after)
+    public BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after) =>
+        Compare(before, after, new BenchmarkCompareOptions());
+
+    public BenchmarkComparison Compare(
+        BenchmarkRun before,
+        BenchmarkRun after,
+        BenchmarkCompareOptions options)
     {
         ArgumentNullException.ThrowIfNull(before);
         ArgumentNullException.ThrowIfNull(after);
+        options ??= new BenchmarkCompareOptions();
 
         var metrics = new List<BenchmarkComparisonMetric>
         {
@@ -144,25 +151,12 @@ public sealed class BenchmarkCalculator : IBenchmarkCalculator
                 "Only valid when frame-time samples exist. Not a guaranteed improvement."));
         }
 
-        // Stamp interpretation on each metric (Unavailable never becomes 0)
+        // Stamp interpretation; never leave zeros for unavailable
         for (var i = 0; i < metrics.Count; i++)
         {
             var row = BenchmarkComparisonPresenter.ToDisplayRow(metrics[i]);
-            metrics[i] = new BenchmarkComparisonMetric
-            {
-                Metric = metrics[i].Metric,
-                Unit = metrics[i].Unit,
-                Before = metrics[i].IsAvailable ? metrics[i].Before : null,
-                After = metrics[i].IsAvailable ? metrics[i].After : null,
-                Difference = metrics[i].IsAvailable ? metrics[i].Difference : null,
-                PercentDifference = metrics[i].IsAvailable ? metrics[i].PercentDifference : null,
-                IsAvailable = metrics[i].IsAvailable,
-                Notes = metrics[i].Notes,
-                Interpretation = row.Interpretation
-            };
             if (!metrics[i].IsAvailable)
             {
-                // Explicit: never leave zeros that look like measurements
                 metrics[i] = new BenchmarkComparisonMetric
                 {
                     Metric = metrics[i].Metric,
@@ -176,21 +170,44 @@ public sealed class BenchmarkCalculator : IBenchmarkCalculator
                     Interpretation = "Unavailable"
                 };
             }
+            else
+            {
+                metrics[i] = new BenchmarkComparisonMetric
+                {
+                    Metric = metrics[i].Metric,
+                    Unit = metrics[i].Unit,
+                    Before = metrics[i].Before,
+                    After = metrics[i].After,
+                    Difference = metrics[i].Difference,
+                    PercentDifference = metrics[i].PercentDifference,
+                    IsAvailable = true,
+                    Notes = metrics[i].Notes,
+                    Interpretation = row.Interpretation
+                };
+            }
         }
 
-        var warnings = BenchmarkComparisonPresenter.AnalyzeConditions(
+        var report = BenchmarkConditionRules.Analyze(
             before,
             after,
-            before.SystemInformation.SystemFingerprintId,
-            after.SystemInformation.SystemFingerprintId).ToList();
+            forcedDespiteMismatch: options.ForceCompareDespiteSevereMismatch);
+
+        // Keep Phase 10 warning list for UI back-compat
+        var warnings = report.Warnings.Count > 0
+            ? report.Warnings
+            : BenchmarkComparisonPresenter.AnalyzeConditions(
+                before, after,
+                before.SystemInformation?.SystemFingerprintId,
+                after.SystemInformation?.SystemFingerprintId).ToList();
 
         var available = metrics.Where(m => m.IsAvailable).ToList();
         var summary = available.Count == 0
             ? "No overlapping available metrics to compare."
             : $"Compared {available.Count} metric(s). FrameForge does not guarantee FPS improvements.";
-        if (warnings.Count > 0)
+        summary += " " + report.Summary;
+        if (report.ForcedDespiteMismatch)
         {
-            summary += " Benchmark conditions differ — see warnings.";
+            summary += " " + report.ForcedNote;
         }
 
         return new BenchmarkComparison
@@ -199,7 +216,9 @@ public sealed class BenchmarkCalculator : IBenchmarkCalculator
             RunB = after,
             Metrics = metrics,
             ConditionWarnings = warnings,
-            Summary = summary
+            ConditionReport = report,
+            ForcedDespiteMismatch = report.ForcedDespiteMismatch,
+            Summary = summary.Trim()
         };
     }
 
