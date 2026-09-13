@@ -74,6 +74,24 @@ public sealed class IntelligenceExportService : IIntelligenceExportService
         _log.LogInformation($"Exported {package.Snapshots.Count} snapshot(s) to {destinationPath}");
     }
 
+    public async Task ExportConditionReportAsync(
+        string destinationPath,
+        BenchmarkRun a,
+        BenchmarkRun b,
+        BenchmarkConditionReport? report = null,
+        bool userOverrode = false,
+        string? overrideReason = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
+        var package = ConditionReportExporter.Build(a, b, report, userOverrode, overrideReason);
+        await FrameForgeJson.SerializeFileAsync(destinationPath, package, cancellationToken).ConfigureAwait(false);
+        _log.LogInformation($"Exported condition report to {destinationPath}");
+    }
+
+
     public async Task<IntelligenceImportPreview> PreviewImportAsync(
         string sourcePath,
         CancellationToken cancellationToken = default)

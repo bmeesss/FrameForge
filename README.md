@@ -37,7 +37,7 @@ It analyzes your PC and CS2 installation, recommends **safe** optimizations, man
 - **Apply baseline + snapshots** — every successful `ApplyDiffAsync` records per-key snapshots and refreshes the managed-file hash baseline; self-writes are suppressed so the watcher does not false-invalidate FrameForge applies.
 - **Import preview UI** — dedicated Performance History panel (files/records/evidence/fingerprints/conflicts); validation-only until Confirm merge / Import as new; Cancel is default.
 - **Benchmark integrity (Phase 11)** — every run stamps `SystemFingerprintId` from the existing non-PII fingerprint service before sampling (null if unavailable; run still proceeds). Guided baseline/post fingerprints come from benchmark snapshots (source of truth). Condition match statuses: **Match / Warning / SevereMismatch / Unknown** (missing metadata = Unknown, not mismatch). Severe rules (both sides present): different fingerprint, CPU, GPU, or duration/interval/warm-up → automatic Improved/Regressed becomes **Inconclusive** unless the user explicitly **Compare anyway** (still labeled *Comparison performed despite condition mismatch*). Comparison reliability (High/Medium/Low/Unknown) is a heuristic, not statistical confidence. Completed runs fail integrity validation rather than saving as Completed when samples/timestamps/config are invalid. **GPU utilization remains Unavailable** — PDH researched but not shipped (unreliable counter discovery across drivers; see `src/FrameForge.Benchmark/GpuUtilizationNotes.md`). Import confirmation uses a modal dialog with Cancel default focus (Escape cancels; no writes until Merge / Import as New).
-- **Performance History filters** — Current / Other / All systems, setting text, classification, confidence; sort by Latest / Most tested / Best / Worst. Setting detail shows live current, recommended, last measured, confidence, restore state, retest/restore. Filters operate on the cached index only (no re-benchmark on open).
+- **Guided integrity gate & reliability history (Phase 12)** — after the post benchmark, FrameForge evaluates conditions **before** the final compare. On **SevereMismatch** the run enters `AwaitingConditionDecision` with an explicit gate: **Continue Comparison** or **Stop / Restore** (default focus; Escape = Stop/Restore). Continue still classifies as **Inconclusive** and stores `ConditionOverride=true` — a forced comparison is **not** a valid performance proof. Stop restores applied cfg, keeps benchmark history, and records the stop reason. Condition decision fields persist on guided runs (schema v3; v1/v2 still load). History filters (in memory) cover fingerprint, condition reliability, condition status, profile, classification, and confidence (default: current system). Standalone local export: `*.frameforge-condition-report.json` (nulls for missing values; no PII).- **Performance History filters** — Current / Other / All systems, setting text, classification, confidence; sort by Latest / Most tested / Best / Worst. Setting detail shows live current, recommended, last measured, confidence, restore state, retest/restore. Filters operate on the cached index only (no re-benchmark on open).
 - **Logging** — structured local logs; secrets redacted.
 - **UI** — dark WPF shell (Windows). Linux builds use a stub host so libraries/tests compile. Loading/empty/error states and confirmation dialogs. Execution status warning when the managed cfg is not wired into autoexec.
 
@@ -216,17 +216,25 @@ Orchestrates existing systems into one safe A/B workflow. It does **not** invent
 7. **Backup** managed cfg + autoexec. Backup failure → **STOP** (no apply).
 8. **Apply** via existing `ICs2SettingsService.ApplyDiffAsync` only → **verify**. Verify failure → auto-restore → run ends Restored/Failed.
 9. **Post benchmark** with the **same** duration / interval / warm-up as the baseline.
-10. **Compare** measured metrics → classification (see below).
-11. **Keep** (leave cfg) or **Restore** (backup restore + verify). Benchmark history is never deleted on restore.
-12. **Persist** the guided run under local `GuidedRuns/`.
+10. **Evaluate conditions** (Phase 12). On **SevereMismatch** → integrity gate (`AwaitingConditionDecision`): **Continue Comparison** or **Stop / Restore** (default; Escape = stop). Continue proceeds to compare but stays **Inconclusive** with override flags. Stop restores cfg and ends without a performance claim.
+11. **Compare** measured metrics → classification (see below). Override ≠ proof.
+12. **Keep** (leave cfg) or **Restore** (backup restore + verify). Benchmark history is never deleted on restore.
+13. **Persist** the guided run under local `GuidedRuns/` (schema v3 condition fields).
 
 ### States
 
-`Idle` → `Preparing` → `BenchmarkingBefore` → `PreparingOptimization` → `AwaitingConfirmation` → `Applying` → `BenchmarkingAfter` → `Comparing` → `AwaitingDecision` → `Completed` | `Restoring` → `Restored` | `Cancelled` | `Failed`.
+`Idle` → `Preparing` → `BenchmarkingBefore` → `PreparingOptimization` → `AwaitingConfirmation` → `Applying` → `BenchmarkingAfter` → (`AwaitingConditionDecision` on severe mismatch) → `Comparing` → `AwaitingDecision` → `Completed` | `Restoring` → `Restored` | `Cancelled` | `Failed`.
 
-### Condition warnings
+### Condition warnings & integrity gate (Phase 12)
 
-If CPU / GPU / RAM / OS / CS2 process / profile / duration / interval / power / resolution / refresh differ between baseline and post (when known), FrameForge warns that the comparison **may not be reliable**. Warnings rarely hard-block; they are recorded on the run.
+If CPU / GPU / RAM / OS / CS2 process / profile / duration / interval / power / resolution / refresh differ between baseline and post (when known), FrameForge warns that the comparison **may not be reliable**. **Severe** mismatches (fingerprint / CPU / GPU / bench timing when both sides present) open an explicit gate before final compare:
+
+| Choice | Effect |
+|--------|--------|
+| **Stop / Restore** (default focus, Escape) | Restore previous cfg; classification **Inconclusive**; benches kept; `ConditionOverride=false` |
+| **Continue Comparison** | Compare proceeds with forced note; classification stays **Inconclusive**; `ConditionOverride=true` — **not a valid performance proof** |
+
+History filters (Performance / Guided) can narrow by system fingerprint, condition reliability, condition status, profile, classification, and confidence. Default view prefers the **current system**; other machines show as **Different system**. Export a standalone local `*.frameforge-condition-report.json` from the comparison UI (no PII; missing fields stay null).
 
 ### Comparison & classification
 

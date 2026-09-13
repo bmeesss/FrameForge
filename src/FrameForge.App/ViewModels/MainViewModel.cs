@@ -99,6 +99,8 @@ public sealed class MainViewModel : ViewModelBase
             RaisePropertyChanged(nameof(IsGuidedRunning));
             RaisePropertyChanged(nameof(IsGuidedAwaitingConfirmation));
             RaisePropertyChanged(nameof(IsGuidedAwaitingDecision));
+            RaisePropertyChanged(nameof(IsGuidedAwaitingConditionDecision));
+            RaisePropertyChanged(nameof(GuidedConditionGateMessage));
             RaiseCanExecutes();
         };
         _guided.ProgressChanged += (_, p) =>
@@ -224,6 +226,14 @@ public sealed class MainViewModel : ViewModelBase
         CancelGuidedCommand = new RelayCommand(() => _guided.Cancel(), () => IsGuidedRunning);
         KeepGuidedCommand = new RelayCommand(() => _guided.Decide(GuidedUserDecision.Keep), () => IsGuidedAwaitingDecision);
         RestoreGuidedCommand = new RelayCommand(() => _guided.Decide(GuidedUserDecision.Restore), () => IsGuidedAwaitingDecision);
+        ContinueGuidedComparisonCommand = new RelayCommand(
+            () => _guided.ContinueComparison(),
+            () => IsGuidedAwaitingConditionDecision);
+        StopGuidedConditionCommand = new RelayCommand(
+            () => _guided.StopRestoreDueToConditionMismatch(),
+            () => IsGuidedAwaitingConditionDecision);
+        ExportConditionReportCommand = new AsyncRelayCommand(ExportConditionReportAsync,
+            () => SelectedBenchmarkA is not null && SelectedBenchmarkB is not null && HasBenchmarkComparison);
         RefreshGuidedHistoryCommand = new AsyncRelayCommand(LoadGuidedHistoryAsync, () => !IsBusy);
 
         // Phase 6 — Custom / individual optimization
@@ -310,6 +320,7 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<CustomOptimizationRowViewModel> CustomOptimizationRows { get; } = new();
     public ObservableCollection<CustomOptimizationSet> CustomOptimizationSets { get; } = new();
     public ObservableCollection<SettingPerformanceRecord> PerformanceRecords { get; } = new();
+    public ObservableCollection<HistoryReliabilityRow> HistoryReliabilityRows { get; } = new();
     public ObservableCollection<SettingTestEvidence> PerformanceEvidenceRows { get; } = new();
     public ObservableCollection<PerformanceRunCompareRow> PerformanceCompareRows { get; } = new();
     public ObservableCollection<PerformanceTrendPoint> PerformanceTrendPoints { get; } = new();
@@ -571,6 +582,9 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand CancelGuidedCommand { get; }
     public ICommand KeepGuidedCommand { get; }
     public ICommand RestoreGuidedCommand { get; }
+    public ICommand ContinueGuidedComparisonCommand { get; }
+    public ICommand StopGuidedConditionCommand { get; }
+    public ICommand ExportConditionReportCommand { get; }
     public ICommand RefreshGuidedHistoryCommand { get; }
     public ICommand RefreshCustomCatalogCommand { get; }
     public ICommand SelectAllVisibleCustomCommand { get; }
@@ -937,6 +951,70 @@ public sealed class MainViewModel : ViewModelBase
         "Worst result"
     };
 
+    public string PerformanceReliabilityFilter
+    {
+        get => _performanceReliabilityFilter;
+        set
+        {
+            if (SetProperty(ref _performanceReliabilityFilter, value ?? "(All reliability)"))
+            {
+                ApplyPerformanceFilters();
+            }
+        }
+    }
+    private string _performanceReliabilityFilter = "(All reliability)";
+
+    public IReadOnlyList<string> PerformanceReliabilityFilterOptions { get; } = new[]
+    {
+        "(All reliability)", "High", "Medium", "Low", "Unknown"
+    };
+
+    public string PerformanceConditionStatusFilter
+    {
+        get => _performanceConditionStatusFilter;
+        set
+        {
+            if (SetProperty(ref _performanceConditionStatusFilter, value ?? "(All conditions)"))
+            {
+                ApplyPerformanceFilters();
+            }
+        }
+    }
+    private string _performanceConditionStatusFilter = "(All conditions)";
+
+    public IReadOnlyList<string> PerformanceConditionStatusFilterOptions { get; } = new[]
+    {
+        "(All conditions)", "Match", "Warning", "SevereMismatch", "Unknown"
+    };
+
+    public string PerformanceProfileFilter
+    {
+        get => _performanceProfileFilter;
+        set
+        {
+            if (SetProperty(ref _performanceProfileFilter, value ?? string.Empty))
+            {
+                ApplyPerformanceFilters();
+            }
+        }
+    }
+    private string _performanceProfileFilter = string.Empty;
+
+    public string PerformanceFingerprintFilter
+    {
+        get => _performanceFingerprintFilter;
+        set
+        {
+            if (SetProperty(ref _performanceFingerprintFilter, value ?? string.Empty))
+            {
+                ApplyPerformanceFilters();
+            }
+        }
+    }
+    private string _performanceFingerprintFilter = string.Empty;
+
+    public bool HasHistoryReliabilityRows => HistoryReliabilityRows.Count > 0;
+
     public SettingDetailViewState? SettingDetail
     {
         get => _settingDetail;
@@ -1036,6 +1114,33 @@ public sealed class MainViewModel : ViewModelBase
 
     public bool IsGuidedAwaitingConfirmation => _guided.Status == GuidedOptimizationStatus.AwaitingConfirmation;
     public bool IsGuidedAwaitingDecision => _guided.Status == GuidedOptimizationStatus.AwaitingDecision;
+    public bool IsGuidedAwaitingConditionDecision =>
+        _guided.Status == GuidedOptimizationStatus.AwaitingConditionDecision;
+
+    public string GuidedConditionGateMessage
+    {
+        get
+        {
+            if (!IsGuidedAwaitingConditionDecision)
+            {
+                return string.Empty;
+            }
+
+            var run = _guided.CurrentRun ?? LastGuidedRun;
+            var report = run?.ConditionReport;
+            if (report is null)
+            {
+                return "Severe condition mismatch. Stop / Restore is the safest default.";
+            }
+
+            var severe = string.Join(" ", report.Fields
+                .Where(f => f.Status == ConditionMatchStatus.SevereMismatch)
+                .Select(f => f.Message));
+            return string.IsNullOrWhiteSpace(severe)
+                ? report.Summary + " Stop / Restore is the safest default. A forced comparison is not a valid performance proof."
+                : severe + " Stop / Restore is the safest default. A forced comparison is not a valid performance proof.";
+        }
+    }
     public string GuidedStatusText => _guided.Status.ToString();
 
     public string GuidedProgressMessage
@@ -1296,6 +1401,9 @@ public sealed class MainViewModel : ViewModelBase
         (CancelGuidedCommand as RelayCommand)?.RaiseCanExecuteChanged();
         (KeepGuidedCommand as RelayCommand)?.RaiseCanExecuteChanged();
         (RestoreGuidedCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (ContinueGuidedComparisonCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (StopGuidedConditionCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (ExportConditionReportCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (RefreshGuidedHistoryCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (RefreshCustomCatalogCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (SelectAllVisibleCustomCommand as RelayCommand)?.RaiseCanExecuteChanged();
@@ -2900,6 +3008,80 @@ public sealed class MainViewModel : ViewModelBase
             SelectedPerformanceRecord = PerformanceRecords.FirstOrDefault(r =>
                 r.SettingKey.Equals(keep, StringComparison.OrdinalIgnoreCase));
         }
+
+        RebuildHistoryReliabilityRows();
+    }
+
+    private void RebuildHistoryReliabilityRows()
+    {
+        HistoryReliabilityRows.Clear();
+        foreach (var r in PerformanceRecords)
+        {
+            // Condition metadata comes from latest direct evidence run when available
+            var latest = r.DirectEvidence.OrderByDescending(e => e.TestedAt).FirstOrDefault()
+                         ?? r.AssociatedEvidence.OrderByDescending(e => e.TestedAt).FirstOrDefault();
+            var status = ConditionMatchStatus.Unknown;
+            var reliability = ComparisonReliability.Unknown;
+            // Prefer guided history match
+            var guided = GuidedHistory.FirstOrDefault(g =>
+                latest is not null && g.Id.Equals(latest.GuidedRunId, StringComparison.OrdinalIgnoreCase));
+            if (guided?.ConditionReport is not null)
+            {
+                status = guided.ConditionReport.OverallStatus;
+                reliability = guided.ConditionReport.Reliability;
+            }
+            else if (guided?.ConditionStatusAtDecision is { } cs)
+            {
+                status = cs;
+                reliability = guided.ConditionReliabilityAtDecision ?? ComparisonReliability.Unknown;
+            }
+
+            if (PerformanceReliabilityFilter is not "(All reliability)" &&
+                !string.Equals(reliability.ToString(), PerformanceReliabilityFilter, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (PerformanceConditionStatusFilter is not "(All conditions)" &&
+                !string.Equals(status.ToString(), PerformanceConditionStatusFilter, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(PerformanceFingerprintFilter) &&
+                !(r.SystemFingerprintId ?? string.Empty).Contains(PerformanceFingerprintFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(PerformanceProfileFilter))
+            {
+                var pn = guided?.ProfileName ?? guided?.OptimizationLabel ?? string.Empty;
+                if (!pn.Contains(PerformanceProfileFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+            }
+
+            HistoryReliabilityRows.Add(new HistoryReliabilityRow
+            {
+                Id = r.SettingKey + "@" + (r.SystemFingerprintId ?? "unknown"),
+                Date = r.LastTestedAt ?? DateTimeOffset.MinValue,
+                SettingOrProfile = r.SettingName,
+                SystemLabel = r.FingerprintLabel,
+                IsCurrentSystem = r.IsCurrentSystem,
+                FingerprintId = r.SystemFingerprintId ?? string.Empty,
+                ConditionReliability = reliability,
+                ConditionStatus = status,
+                Classification = r.DisplayLatest,
+                Confidence = r.DisplayConfidence,
+                ProfileName = guided?.ProfileName,
+                SourceRecord = r,
+                SourceRun = guided
+            });
+        }
+
+        RaisePropertyChanged(nameof(HasHistoryReliabilityRows));
     }
 
     private async Task BuildSettingDetailAsync(SettingPerformanceRecord record)
@@ -3925,6 +4107,50 @@ Full backup restore is a separate explicit action on the Backups page.",
             StatusMessage = condition.OverallStatus == ConditionMatchStatus.Match
                 ? "Comparison ready — conditions match."
                 : "Comparison ready — see condition panel.";
+        }
+    }
+
+    private async Task ExportConditionReportAsync()
+    {
+        if (SelectedBenchmarkA is null || SelectedBenchmarkB is null)
+        {
+            StatusMessage = "Select two benchmark runs (A and B) to export a condition report.";
+            return;
+        }
+
+        var dialog = new SaveFileDialog
+        {
+            Filter = "FrameForge condition report (*" + ConditionReportExportSchema.Extension + ")|*" +
+                     ConditionReportExportSchema.Extension + "|JSON (*.json)|*.json",
+            FileName = "condition_" + SelectedBenchmarkA.Id + "_vs_" + SelectedBenchmarkB.Id +
+                       ConditionReportExportSchema.Extension,
+            AddExtension = true,
+            DefaultExt = "frameforge-condition-report.json"
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            StatusMessage = "Condition report export cancelled.";
+            return;
+        }
+
+        try
+        {
+            var report = _lastConditionReport
+                ?? BenchmarkConditionRules.Analyze(SelectedBenchmarkA, SelectedBenchmarkB, forcedDespiteMismatch: false);
+            await _intelExport.ExportConditionReportAsync(
+                dialog.FileName,
+                SelectedBenchmarkA,
+                SelectedBenchmarkB,
+                report,
+                userOverrode: report.ForcedDespiteMismatch,
+                overrideReason: report.ForcedNote).ConfigureAwait(true);
+            StatusMessage = "Exported condition report (local only, no PII) to " + dialog.FileName;
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            StatusMessage = "Condition report export failed.";
+            _log.LogError("Condition report export failed.", ex);
         }
     }
 

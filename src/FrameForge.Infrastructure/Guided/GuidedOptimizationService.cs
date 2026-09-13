@@ -409,8 +409,8 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
             run.PostBenchmarkId = post.Id;
             Report(run, $"Post benchmark saved: {post.Id}");
 
-            // ── Compare + conditions ────────────────────────────────────
-            SetStatus(run, GuidedOptimizationStatus.Comparing, "Comparing baseline vs post…", 85);
+            // ── Evaluate conditions BEFORE final compare (Phase 12 integrity gate) ──
+            SetStatus(run, GuidedOptimizationStatus.Comparing, "Evaluating baseline vs post conditions…", 82);
             var before = await _benchmarkStore.GetAsync(baseline.Id, linked.Token).ConfigureAwait(false) ?? baseline;
             var after = await _benchmarkStore.GetAsync(post.Id, linked.Token).ConfigureAwait(false) ?? post;
 
@@ -433,19 +433,70 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
                 }).ToList()
                 : BuildConditionWarnings(before, after).ToList();
 
-            var comparison = _calculator.Compare(before, after);
-            run.Comparison = comparison;
-            run.ComparisonRows = BuildRows(comparison).ToList();
-            var provisional = GuidedClassificationRules.Classify(run.ComparisonRows, out var reason);
-            run.Classification = BenchmarkConditionRules.ApplyClassificationGate(
-                provisional, conditionReport, out var gateSuffix);
-            run.ClassificationReason = reason + gateSuffix;
-
+            var forceCompare = false;
             if (conditionReport.HasSevereMismatch)
             {
-                Report(run,
-                    "Severe condition mismatch — classification is Inconclusive unless the user forces compare. " +
-                    conditionReport.Summary);
+                var why = BuildSevereMismatchMessage(conditionReport);
+                run.ConditionStatusAtDecision = conditionReport.OverallStatus;
+                run.ConditionReliabilityAtDecision = conditionReport.Reliability;
+                SetStatus(
+                    run,
+                    GuidedOptimizationStatus.AwaitingConditionDecision,
+                    why + " Choose Continue Comparison or Stop / Restore (default).",
+                    84);
+                Report(run, why);
+
+                var gateDecision = await WaitForDecisionAsync(linked.Token).ConfigureAwait(false);
+                run.ConditionDecision = gateDecision;
+
+                if (gateDecision is GuidedUserDecision.StopRestore or GuidedUserDecision.Restore
+                    or GuidedUserDecision.Cancelled)
+                {
+                    run.ConditionOverride = false;
+                    run.ConditionOverrideReason = "User stopped at integrity gate: " + why;
+                    run.ForcedCompareDespiteMismatch = false;
+                    run.Classification = GuidedResultClassification.Inconclusive;
+                    run.ClassificationReason =
+                        "Stopped due to severe condition mismatch before final comparison. " + why;
+                    run.UserDecision = GuidedUserDecision.StopRestore;
+
+                    // Restore applied changes — do not classify as successful optimization
+                    SetStatus(run, GuidedOptimizationStatus.Restoring,
+                        "Stopping due to condition mismatch — restoring previous configuration…", 90);
+                    var stopRestore = await TryRestoreAfterMismatchAsync(run, linked.Token).ConfigureAwait(false);
+                    if (!stopRestore.ok)
+                    {
+                        Fail(run, "Stop/Restore after condition mismatch failed: " + stopRestore.message);
+                        return await FinishAsync(run).ConfigureAwait(false);
+                    }
+
+                    run.RestoredSuccessfully = stopRestore.restored;
+                    SetStatus(
+                        run,
+                        stopRestore.restored ? GuidedOptimizationStatus.Restored : GuidedOptimizationStatus.Cancelled,
+                        stopRestore.restored
+                            ? "Stopped due to condition mismatch; previous configuration restored. " + stopRestore.message
+                            : "Stopped due to condition mismatch; " + stopRestore.message,
+                        100);
+                    run.CompletedAt = DateTimeOffset.UtcNow;
+                    return await FinishAsync(run).ConfigureAwait(false);
+                }
+
+                if (gateDecision is GuidedUserDecision.ContinueComparison or GuidedUserDecision.Keep)
+                {
+                    forceCompare = true;
+                    run.ConditionOverride = true;
+                    run.ForcedCompareDespiteMismatch = true;
+                    run.ConditionOverrideReason =
+                        "User continued comparison despite severe mismatch. " +
+                        "A forced comparison does not become a valid performance proof. " + why;
+                    Report(run, run.ConditionOverrideReason);
+                }
+                else
+                {
+                    // Unexpected — treat as stop
+                    return await CancelledAsync(run).ConfigureAwait(false);
+                }
             }
             else if (conditionReport.OverallStatus == ConditionMatchStatus.Warning)
             {
@@ -458,6 +509,32 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
                             " · Reliability: " + conditionReport.Reliability + " (not statistical).");
             }
 
+            // ── Final compare (after gate) ──────────────────────────────
+            SetStatus(run, GuidedOptimizationStatus.Comparing, "Comparing baseline vs post…", 85);
+            conditionReport = BenchmarkConditionRules.Analyze(before, after, forcedDespiteMismatch: forceCompare);
+            run.ConditionReport = conditionReport;
+
+            var comparison = _calculator.Compare(
+                before,
+                after,
+                new BenchmarkCompareOptions { ForceCompareDespiteSevereMismatch = forceCompare });
+            run.Comparison = comparison;
+            run.ComparisonRows = BuildRows(comparison).ToList();
+            var provisional = GuidedClassificationRules.Classify(run.ComparisonRows, out var reason);
+            // Always gate: severe (with or without force) → Inconclusive for performance claims
+            run.Classification = BenchmarkConditionRules.ApplyClassificationGate(
+                provisional, conditionReport, out var gateSuffix);
+            run.ClassificationReason = reason + gateSuffix;
+            if (forceCompare)
+            {
+                run.Classification = GuidedResultClassification.Inconclusive;
+                if (!run.ClassificationReason.Contains("despite condition mismatch", StringComparison.OrdinalIgnoreCase))
+                {
+                    run.ClassificationReason +=
+                        " Comparison performed despite condition mismatch. Not a valid performance proof.";
+                }
+            }
+
             // ── Await keep / restore ────────────────────────────────────
             SetStatus(run, GuidedOptimizationStatus.AwaitingDecision,
                 $"Comparison ready ({run.Classification}). Choose Keep Changes or Restore Previous State.", 90);
@@ -465,26 +542,19 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
             var decision = await WaitForDecisionAsync(linked.Token).ConfigureAwait(false);
             run.UserDecision = decision;
 
-            if (decision == GuidedUserDecision.Restore)
+            if (decision == GuidedUserDecision.Restore || decision == GuidedUserDecision.StopRestore)
             {
                 SetStatus(run, GuidedOptimizationStatus.Restoring, "Restoring backup…", 95);
-                if (string.IsNullOrWhiteSpace(run.BackupId))
+                var restoreResult = await TryRestoreAfterMismatchAsync(run, linked.Token).ConfigureAwait(false);
+                if (!restoreResult.ok)
                 {
-                    Fail(run, "No backup id recorded; cannot restore automatically.");
+                    Fail(run, "Restore failed: " + restoreResult.message);
                     return await FinishAsync(run).ConfigureAwait(false);
                 }
 
-                var restore = await _settings.RestoreLastFrameForgeChangesAsync(linked.Token).ConfigureAwait(false);
-                // Prefer explicit backup id if RestoreLast used a different one — still try settings restore path
-                if (!restore.Success)
-                {
-                    // fall through — RestoreLast uses LastSettingsBackupId which apply set
-                    Fail(run, "Restore failed: " + restore.Message);
-                    return await FinishAsync(run).ConfigureAwait(false);
-                }
-
-                run.RestoredSuccessfully = true;
-                SetStatus(run, GuidedOptimizationStatus.Restored, "Previous configuration restored. " + restore.Message, 100);
+                run.RestoredSuccessfully = restoreResult.restored;
+                SetStatus(run, GuidedOptimizationStatus.Restored,
+                    "Previous configuration restored. " + restoreResult.message, 100);
                 run.CompletedAt = DateTimeOffset.UtcNow;
                 return await FinishAsync(run).ConfigureAwait(false);
             }
@@ -533,20 +603,39 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
 
     public void Cancel()
     {
+        bool atConditionGate;
         lock (_gate)
         {
+            atConditionGate = _status == GuidedOptimizationStatus.AwaitingConditionDecision;
             _cancelRequested = true;
-            try { _runCts?.Cancel(); } catch { /* ignore */ }
             _confirmTcs?.TrySetResult(false);
-            _decisionTcs?.TrySetResult(GuidedUserDecision.Cancelled);
+            // Prefer safest stop at condition gate; set decision BEFORE any CTS cancel
+            // so WaitForDecisionAsync does not race to Cancelled via token registration.
+            _decisionTcs?.TrySetResult(
+                atConditionGate
+                    ? GuidedUserDecision.StopRestore
+                    : GuidedUserDecision.Cancelled);
+            // Do not cancel the run CTS at the integrity gate — restore must still run.
+            if (!atConditionGate)
+            {
+                try { _runCts?.Cancel(); } catch { /* ignore */ }
+            }
         }
 
-        try { _benchmark.RequestCancel(); } catch { /* ignore */ }
+        if (!atConditionGate)
+        {
+            try { _benchmark.RequestCancel(); } catch { /* ignore */ }
+        }
     }
+
+    public void ContinueComparison() => Decide(GuidedUserDecision.ContinueComparison);
+
+    public void StopRestoreDueToConditionMismatch() => Decide(GuidedUserDecision.StopRestore);
 
     public void Decide(GuidedUserDecision decision)
     {
-        if (decision is not (GuidedUserDecision.Keep or GuidedUserDecision.Restore or GuidedUserDecision.Cancelled))
+        if (decision is not (GuidedUserDecision.Keep or GuidedUserDecision.Restore or GuidedUserDecision.Cancelled
+            or GuidedUserDecision.ContinueComparison or GuidedUserDecision.StopRestore))
         {
             throw new ArgumentOutOfRangeException(nameof(decision));
         }
@@ -773,6 +862,52 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
         {
             _confirmTcs = null;
             _decisionTcs = null;
+        }
+    }
+
+    private static string BuildSevereMismatchMessage(BenchmarkConditionReport report)
+    {
+        var parts = report.Fields
+            .Where(f => f.Status == ConditionMatchStatus.SevereMismatch)
+            .Select(f => f.Message)
+            .Where(m => !string.IsNullOrWhiteSpace(m))
+            .ToList();
+        if (parts.Count == 0 && !string.IsNullOrWhiteSpace(report.Summary))
+        {
+            parts.Add(report.Summary);
+        }
+
+        var detail = parts.Count > 0 ? string.Join(" ", parts) : "Severe condition mismatch between baseline and post benchmarks.";
+        return "Severe condition mismatch — comparison is not a valid performance proof. " + detail;
+    }
+
+    /// <summary>
+    /// Restores the last FrameForge-managed changes after a condition-gate stop or user restore.
+    /// Returns ok=false when restore explicitly failed; ok=true with restored=false when nothing to restore.
+    /// </summary>
+    private async Task<(bool ok, bool restored, string message)> TryRestoreAfterMismatchAsync(
+        GuidedOptimizationRun run,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Prefer completing restore even if the user cancelled the wait — safety first.
+            var token = cancellationToken.IsCancellationRequested
+                ? CancellationToken.None
+                : cancellationToken;
+            var result = await _settings.RestoreLastFrameForgeChangesAsync(token).ConfigureAwait(false);
+            if (!result.Success)
+            {
+                return (false, false, result.Message ?? "Restore failed.");
+            }
+
+            run.RestoredSuccessfully = true;
+            return (true, true, result.Message ?? "Previous configuration restored.");
+        }
+        catch (Exception ex)
+        {
+            _log.LogError("Restore after condition mismatch failed.", ex);
+            return (false, false, ex.Message);
         }
     }
 

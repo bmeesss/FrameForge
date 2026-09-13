@@ -10,6 +10,8 @@ public enum GuidedOptimizationStatus
     AwaitingConfirmation,
     Applying,
     BenchmarkingAfter,
+    /// <summary>Severe condition mismatch — user must Continue Comparison or Stop/Restore.</summary>
+    AwaitingConditionDecision,
     Comparing,
     AwaitingDecision,
     Completed,
@@ -25,7 +27,11 @@ public enum GuidedUserDecision
     None,
     Keep,
     Restore,
-    Cancelled
+    Cancelled,
+    /// <summary>User chose to continue comparison after severe condition mismatch.</summary>
+    ContinueComparison,
+    /// <summary>User chose stop/restore after severe condition mismatch (default).</summary>
+    StopRestore
 }
 
 /// <summary>
@@ -154,8 +160,23 @@ public sealed class GuidedOptimizationRun
     /// <summary>Condition match report for baseline vs post (Phase 11).</summary>
     public BenchmarkConditionReport? ConditionReport { get; set; }
 
-    /// <summary>User forced comparison despite severe mismatch.</summary>
+    /// <summary>User forced comparison despite severe mismatch (legacy alias of ConditionOverride).</summary>
     public bool ForcedCompareDespiteMismatch { get; set; }
+
+    /// <summary>Decision at the integrity gate (ContinueComparison / StopRestore / None).</summary>
+    public GuidedUserDecision ConditionDecision { get; set; } = GuidedUserDecision.None;
+
+    /// <summary>True when user continued comparison after severe mismatch.</summary>
+    public bool ConditionOverride { get; set; }
+
+    /// <summary>Why override was allowed / denied (human-readable, no PII).</summary>
+    public string? ConditionOverrideReason { get; set; }
+
+    /// <summary>Overall condition status when the gate decision was made.</summary>
+    public ConditionMatchStatus? ConditionStatusAtDecision { get; set; }
+
+    /// <summary>Reliability at decision time (condition reliability, not statistical confidence).</summary>
+    public ComparisonReliability? ConditionReliabilityAtDecision { get; set; }
 
     public string? InitialBenchmarkId { get; set; }
     public string? PostBenchmarkId { get; set; }
@@ -183,8 +204,8 @@ public sealed class GuidedOptimizationRun
 
 public static class GuidedOptimizationSchema
 {
-    /// <summary>v1 = Phase 5; v2 adds SelectedSettings / CustomSet fields (backward compatible).</summary>
-    public const int CurrentVersion = 2;
+    /// <summary>v1 = Phase 5; v2 = SelectedSettings/CustomSet; v3 = condition gate fields (backward compatible).</summary>
+    public const int CurrentVersion = 3;
     public const int MinReadableVersion = 1;
     public const string FileExtension = ".json";
 }

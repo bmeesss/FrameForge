@@ -622,11 +622,16 @@
                         </DataTemplate>
                       </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <Button Content="Compare anyway" Style="{StaticResource NavButtonStyle}" Padding="8,4" Margin="0,8,0,0"
-                            HorizontalAlignment="Left"
-                            Command="{Binding ForceCompareBenchmarksCommand}"
-                            ToolTip="Requires confirmation on SevereMismatch. Still states comparison was forced."
-                            AutomationProperties.Name="Force compare despite severe mismatch" />
+                    <WrapPanel Margin="0,8,0,0">
+                      <Button Content="Compare anyway" Style="{StaticResource NavButtonStyle}" Padding="8,4" Margin="0,0,8,4"
+                              Command="{Binding ForceCompareBenchmarksCommand}"
+                              ToolTip="Requires confirmation on SevereMismatch. Still states comparison was forced. Not a valid performance proof."
+                              AutomationProperties.Name="Force compare despite severe mismatch" />
+                      <Button Content="Export Condition Report" Style="{StaticResource NavButtonStyle}" Padding="8,4" Margin="0,0,8,4"
+                              Command="{Binding ExportConditionReportCommand}"
+                              ToolTip="Export .frameforge-condition-report.json (local, no PII)."
+                              AutomationProperties.Name="Export condition report" />
+                    </WrapPanel>
                   </StackPanel>
                 </Border>
                 <Grid Margin="0,0,0,6">
@@ -703,15 +708,47 @@
                 </TextBlock>
                 <TextBlock Text="{Binding GuidedProgressMessage}" TextWrapping="Wrap" Margin="0,0,0,8" />
                 <WrapPanel>
-                  <Button Content="Preview Only" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding PreviewGuidedCommand}" Margin="0,0,8,8" />
-                  <Button Content="Run Guided Optimization" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding StartGuidedCommand}" Margin="0,0,8,8" />
-                  <Button Content="Confirm Apply" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ConfirmGuidedCommand}" Margin="0,0,8,8" />
-                  <Button Content="Cancel" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CancelGuidedCommand}" Margin="0,0,8,8" />
-                  <Button Content="Keep Changes" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding KeepGuidedCommand}" Margin="0,0,8,8" />
-                  <Button Content="Restore Previous" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RestoreGuidedCommand}" Margin="0,0,8,8" />
+                  <Button Content="Preview Only" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding PreviewGuidedCommand}" Margin="0,0,8,8"
+                          AutomationProperties.Name="Preview guided optimization" />
+                  <Button Content="Run Guided Optimization" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding StartGuidedCommand}" Margin="0,0,8,8"
+                          AutomationProperties.Name="Run guided optimization" />
+                  <Button Content="Confirm Apply" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ConfirmGuidedCommand}" Margin="0,0,8,8"
+                          AutomationProperties.Name="Confirm apply settings" />
+                  <Button Content="Cancel" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CancelGuidedCommand}" Margin="0,0,8,8" IsCancel="True"
+                          AutomationProperties.Name="Cancel guided run" />
+                  <Button Content="Keep Changes" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding KeepGuidedCommand}" Margin="0,0,8,8"
+                          AutomationProperties.Name="Keep applied changes" />
+                  <Button Content="Restore Previous" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RestoreGuidedCommand}" Margin="0,0,8,8"
+                          AutomationProperties.Name="Restore previous configuration" />
                 </WrapPanel>
+
+                <!-- Phase 12 integrity gate -->
+                <Border Background="{StaticResource BgSecondaryBrush}" CornerRadius="8" Padding="12" Margin="0,8,0,8"
+                        Visibility="{Binding IsGuidedAwaitingConditionDecision, Converter={StaticResource BoolToVisibilityConverter}}"
+                        AutomationProperties.Name="Guided condition integrity gate">
+                  <StackPanel>
+                    <TextBlock Text="Severe condition mismatch" FontWeight="SemiBold" Margin="0,0,0,6"
+                               Foreground="{StaticResource WarningBrush}" />
+                    <TextBlock Text="{Binding GuidedConditionGateMessage}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                    <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Text="A forced comparison does not become a valid performance proof. Classification stays Inconclusive." />
+                    <WrapPanel>
+                      <Button Content="Stop / Restore" Style="{StaticResource PrimaryButtonStyle}"
+                              Command="{Binding StopGuidedConditionCommand}" Margin="0,0,8,4"
+                              IsDefault="True" IsCancel="True"
+                              ToolTip="Safest default. Restores previous configuration and stops the guided run."
+                              AutomationProperties.Name="Stop and restore after condition mismatch"
+                              AutomationProperties.HelpText="Default focus. Escape also selects Stop/Restore." />
+                      <Button Content="Continue Comparison" Style="{StaticResource NavButtonStyle}" Padding="12,8"
+                              Command="{Binding ContinueGuidedComparisonCommand}" Margin="0,0,8,4"
+                              ToolTip="Proceed with comparison. Result remains Inconclusive for performance claims."
+                              AutomationProperties.Name="Continue comparison despite mismatch" />
+                    </WrapPanel>
+                  </StackPanel>
+                </Border>
+
                 <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" TextWrapping="Wrap"
-                           Text="Confirm Apply is required after the baseline and diff — the progress message lists profile/settings, current→target values, files, backup plan, and risk. Keep/Restore appear after comparison. Backup failure aborts apply. Default dialog focus prefers Cancel/safest action." />
+                           Text="Confirm Apply is required after the baseline and diff. On severe mismatch the run pauses at the integrity gate (Stop/Restore default). Keep/Restore appear after comparison. Forced comparison is not a valid performance proof." />
               </StackPanel>
             </Border>
 
@@ -1026,19 +1063,19 @@
                     <ColumnDefinition Width="*" />
                   </Grid.ColumnDefinitions>
                   <StackPanel Margin="0,0,8,0">
-                    <TextBlock Text="System" Margin="0,0,0,4" />
+                    <TextBlock Text="System (default: Current)" Margin="0,0,0,4" />
                     <ComboBox ItemsSource="{Binding PerformanceSystemFilterOptions}" SelectedItem="{Binding PerformanceSystemFilter}"
                               AutomationProperties.Name="Filter by system fingerprint" />
                   </StackPanel>
                   <StackPanel Grid.Column="1" Margin="0,0,8,0">
-                    <TextBlock Text="Classification" Margin="0,0,0,4" />
-                    <ComboBox ItemsSource="{Binding PerformanceClassificationFilterOptions}" SelectedItem="{Binding PerformanceClassificationFilter}"
-                              AutomationProperties.Name="Filter by classification" />
+                    <TextBlock Text="Condition reliability" Margin="0,0,0,4" />
+                    <ComboBox ItemsSource="{Binding PerformanceReliabilityFilterOptions}" SelectedItem="{Binding PerformanceReliabilityFilter}"
+                              AutomationProperties.Name="Filter by condition reliability" />
                   </StackPanel>
                   <StackPanel Grid.Column="2" Margin="0,0,8,0">
-                    <TextBlock Text="Confidence" Margin="0,0,0,4" />
-                    <ComboBox ItemsSource="{Binding PerformanceConfidenceFilterOptions}" SelectedItem="{Binding PerformanceConfidenceFilter}"
-                              AutomationProperties.Name="Filter by confidence" />
+                    <TextBlock Text="Condition status" Margin="0,0,0,4" />
+                    <ComboBox ItemsSource="{Binding PerformanceConditionStatusFilterOptions}" SelectedItem="{Binding PerformanceConditionStatusFilter}"
+                              AutomationProperties.Name="Filter by condition match status" />
                   </StackPanel>
                   <StackPanel Grid.Column="3">
                     <TextBlock Text="Sort" Margin="0,0,0,4" />
@@ -1046,12 +1083,86 @@
                               AutomationProperties.Name="Sort performance records" />
                   </StackPanel>
                 </Grid>
-                <DockPanel Margin="0,0,0,8">
-                  <TextBlock Text="Setting filter:" VerticalAlignment="Center" Margin="0,0,8,0" />
-                  <TextBox Text="{Binding PerformanceSettingFilter, UpdateSourceTrigger=PropertyChanged}" Padding="6"
-                           AutomationProperties.Name="Filter performance records by setting name or key"
-                           AutomationProperties.HelpText="Filters the cached index in memory — does not re-run benchmarks." />
-                </DockPanel>
+                <Grid Margin="0,0,0,8">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Margin="0,0,8,0">
+                    <TextBlock Text="Classification" Margin="0,0,0,4" />
+                    <ComboBox ItemsSource="{Binding PerformanceClassificationFilterOptions}" SelectedItem="{Binding PerformanceClassificationFilter}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Margin="0,0,8,0">
+                    <TextBlock Text="Confidence" Margin="0,0,0,4" />
+                    <ComboBox ItemsSource="{Binding PerformanceConfidenceFilterOptions}" SelectedItem="{Binding PerformanceConfidenceFilter}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="2" Margin="0,0,8,0">
+                    <TextBlock Text="Setting" Margin="0,0,0,4" />
+                    <TextBox Text="{Binding PerformanceSettingFilter, UpdateSourceTrigger=PropertyChanged}" Padding="6"
+                             AutomationProperties.Name="Filter by setting name or key" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="3">
+                    <TextBlock Text="Profile / fingerprint" Margin="0,0,0,4" />
+                    <TextBox Text="{Binding PerformanceProfileFilter, UpdateSourceTrigger=PropertyChanged}" Padding="4" Margin="0,0,0,4"
+                             ToolTip="Profile name filter" />
+                    <TextBox Text="{Binding PerformanceFingerprintFilter, UpdateSourceTrigger=PropertyChanged}" Padding="4"
+                             ToolTip="Fingerprint id substring" AutomationProperties.Name="Filter by fingerprint id" />
+                  </StackPanel>
+                </Grid>
+                <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8"
+                           Text="Filters apply in memory to the cached index (no disk rescan, no re-benchmark). Condition reliability ≠ statistical confidence. Different system rows are labeled clearly." />
+
+                <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12"
+                        Visibility="{Binding HasHistoryReliabilityRows, Converter={StaticResource BoolToVisibilityConverter}}">
+                  <StackPanel>
+                    <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">History (reliability view)</TextBlock>
+                    <Grid Margin="0,0,0,4">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.2*" />
+                        <ColumnDefinition Width="1.4*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="0.8*" />
+                        <ColumnDefinition Width="0.9*" />
+                        <ColumnDefinition Width="0.8*" />
+                        <ColumnDefinition Width="0.7*" />
+                      </Grid.ColumnDefinitions>
+                      <TextBlock Text="Date" FontWeight="SemiBold" FontSize="11" />
+                      <TextBlock Grid.Column="1" Text="Setting / profile" FontWeight="SemiBold" FontSize="11" />
+                      <TextBlock Grid.Column="2" Text="System" FontWeight="SemiBold" FontSize="11" />
+                      <TextBlock Grid.Column="3" Text="Reliability" FontWeight="SemiBold" FontSize="11" />
+                      <TextBlock Grid.Column="4" Text="Condition" FontWeight="SemiBold" FontSize="11" />
+                      <TextBlock Grid.Column="5" Text="Class" FontWeight="SemiBold" FontSize="11" />
+                      <TextBlock Grid.Column="6" Text="Conf." FontWeight="SemiBold" FontSize="11" />
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding HistoryReliabilityRows}" MaxHeight="220"
+                                  AutomationProperties.Name="Performance history reliability rows">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="1.2*" />
+                              <ColumnDefinition Width="1.4*" />
+                              <ColumnDefinition Width="*" />
+                              <ColumnDefinition Width="0.8*" />
+                              <ColumnDefinition Width="0.9*" />
+                              <ColumnDefinition Width="0.8*" />
+                              <ColumnDefinition Width="0.7*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding DisplayDate}" FontSize="11" />
+                            <TextBlock Grid.Column="1" Text="{Binding SettingOrProfile}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="2" Text="{Binding DisplaySystem}" FontSize="11" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="3" Text="{Binding DisplayReliability}" FontSize="11" />
+                            <TextBlock Grid.Column="4" Text="{Binding DisplayCondition}" FontSize="11" />
+                            <TextBlock Grid.Column="5" Text="{Binding Classification}" FontSize="11" />
+                            <TextBlock Grid.Column="6" Text="{Binding Confidence}" FontSize="11" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
                 <WrapPanel>
                   <Button Content="Assess restore" Style="{StaticResource NavButtonStyle}" Command="{Binding EvaluateTargetedRestoreCommand}" Margin="0,0,8,4" Padding="8,4"
                           ToolTip="Re-read managed cfg and latest snapshot before any write." />

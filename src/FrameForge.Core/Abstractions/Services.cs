@@ -272,8 +272,14 @@ public interface IGuidedOptimizationService
     /// <summary>User cancels while awaiting confirmation or before apply completes setup.</summary>
     void Cancel();
 
-    /// <summary>Keep or restore after comparison (AwaitingDecision).</summary>
+    /// <summary>Keep or restore after comparison (AwaitingDecision), or continue/stop at condition gate.</summary>
     void Decide(GuidedUserDecision decision);
+
+    /// <summary>Continue comparison after severe mismatch (AwaitingConditionDecision).</summary>
+    void ContinueComparison();
+
+    /// <summary>Stop and restore after severe mismatch — default safest action.</summary>
+    void StopRestoreDueToConditionMismatch();
 }
 
 public interface IGuidedOptimizationStore
@@ -368,6 +374,14 @@ public interface IIntelligenceExportService
     Task<IntelligenceExportPackage> BuildExportAsync(CancellationToken cancellationToken = default);
     Task ExportIntelligenceAsync(string destinationPath, CancellationToken cancellationToken = default);
     Task ExportSnapshotsAsync(string destinationPath, CancellationToken cancellationToken = default);
+    Task ExportConditionReportAsync(
+        string destinationPath,
+        BenchmarkRun a,
+        BenchmarkRun b,
+        BenchmarkConditionReport? report = null,
+        bool userOverrode = false,
+        string? overrideReason = null,
+        CancellationToken cancellationToken = default);
     Task<IntelligenceImportPreview> PreviewImportAsync(string sourcePath, CancellationToken cancellationToken = default);
     Task<IntelligenceImportResult> ImportAsync(
         string sourcePath,
