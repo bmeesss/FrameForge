@@ -30,5 +30,10 @@ public sealed class AppSettings
     public string? CustomCs2Path { get; set; }
     public string? CustomSteamPath { get; set; }
 
+    /// <summary>
+    /// Id of the most recent FrameForge-managed CS2 settings backup (for Reset).
+    /// </summary>
+    public string? LastSettingsBackupId { get; set; }
+
     public static AppSettings CreateDefault() => new();
 }

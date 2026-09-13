@@ -228,20 +228,118 @@
         <Grid Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Cs2}">
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
-          <TextBlock Text="CS2 Settings" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,12" />
-          <Border Grid.Row="1" Style="{StaticResource CardBorderStyle}">
-            <ScrollViewer>
-              <ItemsControl ItemsSource="{Binding Cs2ConfigLines}">
+          <DockPanel Margin="0,0,0,8">
+            <TextBlock Text="CS2 Settings" FontSize="26" FontWeight="SemiBold" />
+            <TextBlock DockPanel.Dock="Right" Text="{Binding Cs2SettingsStatus}"
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="420" />
+          </DockPanel>
+          <TextBlock Grid.Row="1" Text="Only documented cfg-backed settings are shown. Changes write to frameforge_settings.cfg and never silently drop unknown user lines."
+                     Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8" />
+
+          <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="160" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <ListBox ItemsSource="{Binding SettingCategories}"
+                     SelectedItem="{Binding SelectedCategory}"
+                     Background="Transparent" BorderThickness="0"
+                     Margin="0,0,12,0">
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding}" Margin="4,8" />
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <Grid Grid.Column="1">
+              <TextBlock Text="No settings in this category (or CS2 not detected)."
+                         Foreground="{StaticResource TextSecondaryBrush}"
+                         HorizontalAlignment="Center" VerticalAlignment="Center"
+                         Visibility="{Binding ShowEmptySettings, Converter={StaticResource BoolToVisibilityConverter}}" />
+              <ListBox ItemsSource="{Binding SettingRows}"
+                       SelectedItem="{Binding SelectedSetting}"
+                       Background="Transparent" BorderThickness="0"
+                       Visibility="{Binding ShowEmptySettings, Converter={StaticResource InverseBoolToVisibilityConverter}}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <Border Style="{StaticResource CardBorderStyle}">
+                      <Grid>
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="2*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="1.2*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                          <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                          <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0" />
+                          <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0">
+                            <Run Text="{Binding ConfigKey, Mode=OneWay}" />
+                            <Run Text="·" />
+                            <Run Text="{Binding Source, Mode=OneWay}" />
+                            <Run Text="·" />
+                            <Run Text="{Binding AllowedHint, Mode=OneWay}" />
+                          </TextBlock>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="8,0">
+                          <TextBlock Text="Current" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" />
+                          <TextBlock Text="{Binding CurrentValue}" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Margin="8,0">
+                          <TextBlock Text="Recommended" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" />
+                          <TextBlock Text="{Binding RecommendedValue}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="3" Margin="8,0">
+                          <TextBlock Text="Edit" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" />
+                          <TextBox Text="{Binding EditValue, UpdateSourceTrigger=PropertyChanged}" Padding="6,4" />
+                        </StackPanel>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Grid>
+          </Grid>
+
+          <Border Grid.Row="3" Style="{StaticResource CardBorderStyle}" Margin="0,12,0,0"
+                  Visibility="{Binding HasPendingDiff, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel>
+              <TextBlock Text="{Binding PendingDiffSummary}" FontWeight="SemiBold" Margin="0,0,0,8" />
+              <ItemsControl ItemsSource="{Binding DiffEntries}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
-                    <TextBlock Text="{Binding}" FontFamily="Consolas" Margin="0,2" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,2" TextWrapping="Wrap">
+                      <Run Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold" />
+                      <Run Text=":" />
+                      <Run Text="{Binding CurrentValue, Mode=OneWay}" />
+                      <Run Text="→" />
+                      <Run Text="{Binding NewValue, Mode=OneWay}" />
+                      <Run Text="(" />
+                      <Run Text="{Binding Reason, Mode=OneWay}" />
+                      <Run Text="· Risk" />
+                      <Run Text="{Binding Risk, Mode=OneWay}" />
+                      <Run Text=")" />
+                    </TextBlock>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-            </ScrollViewer>
+            </StackPanel>
           </Border>
+
+          <WrapPanel Grid.Row="4" Margin="0,12,0,0">
+            <Button Content="Preview changes" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding PreviewSettingsApplyCommand}" Margin="0,0,8,8" />
+            <Button Content="Apply (confirm + backup)" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ApplySettingsDiffCommand}" Margin="0,0,8,8" />
+            <Button Content="Clear diff" Style="{StaticResource NavButtonStyle}" Command="{Binding ClearSettingsDiffCommand}" Margin="0,0,8,8" />
+            <Button Content="Save as Profile" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveAsProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Compare with Profile" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CompareWithProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Reset FrameForge changes" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ResetFrameForgeSettingsCommand}" Margin="0,0,8,8" />
+          </WrapPanel>
         </Grid>
 
         <!-- Profiles -->
@@ -252,6 +350,8 @@
             <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
           <TextBlock Text="Profiles" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,12" />
+          <TextBlock Grid.Row="0" Text="Built-in profiles are protected. Apply always shows a diff and requires confirmation."
+                     Foreground="{StaticResource TextSecondaryBrush}" Margin="120,8,0,12" HorizontalAlignment="Right" />
           <TextBlock Grid.Row="1"
                      Text="No profiles loaded."
                      Foreground="{StaticResource TextSecondaryBrush}"
@@ -266,18 +366,39 @@
               <DataTemplate>
                 <Border Style="{StaticResource CardBorderStyle}">
                   <StackPanel>
-                    <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold" />
+                    <DockPanel>
+                      <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold" />
+                      <TextBlock DockPanel.Dock="Right"
+                                 Foreground="{StaticResource TextSecondaryBrush}">
+                        <Run Text="{Binding SettingCount, Mode=OneWay}" />
+                        <Run Text="settings" />
+                      </TextBlock>
+                    </DockPanel>
                     <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" />
+                    <TextBlock Margin="0,6,0,0" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12">
+                      <Run Text="Updated" />
+                      <Run Text="{Binding UpdatedAt, Mode=OneWay}" />
+                      <Run Text="·" />
+                      <Run Text="{Binding IsBuiltIn, Mode=OneWay, StringFormat=Built-in: {0}}" />
+                      <Run Text="· schema" />
+                      <Run Text="{Binding SchemaVersion, Mode=OneWay}" />
+                    </TextBlock>
                   </StackPanel>
                 </Border>
               </DataTemplate>
             </ListBox.ItemTemplate>
           </ListBox>
-          <Button Grid.Row="2" Content="Activate Profile (selects recommended items — does not auto-apply)"
-                  Style="{StaticResource PrimaryButtonStyle}"
-                  HorizontalAlignment="Left"
-                  Command="{Binding ActivateProfileCommand}"
-                  Margin="0,12,0,0" />
+          <WrapPanel Grid.Row="2" Margin="0,12,0,0">
+            <Button Content="Select / Activate" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ActivateProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Preview diff" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding PreviewProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Apply (diff + confirm)" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ApplyProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Duplicate" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding DuplicateProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Export" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ExportProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Import" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ImportProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Create" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CreateProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Rename" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RenameProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Delete" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding DeleteProfileCommand}" Margin="0,0,8,8" />
+          </WrapPanel>
         </Grid>
 
         <!-- Backups -->

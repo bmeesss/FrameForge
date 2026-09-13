@@ -1,13 +1,26 @@
 {
+  "schemaVersion": 1,
   "id": "competitive",
   "name": "Competitive",
-  "description": "Prioritizes responsiveness and clarity for competitive play.",
+  "description": "Prioritizes competitive clarity and a lower client-side rendering workload. Does not claim a specific FPS gain.",
   "isBuiltIn": true,
   "isCustom": false,
-  "cs2Settings": {
+  "createdAt": "2026-01-01T00:00:00Z",
+  "updatedAt": "2026-01-01T00:00:00Z",
+  "settings": {
     "fps_max": "0",
+    "fps_max_ui": "120",
+    "engine_low_latency_sleep_after_client_tick": "true",
     "cl_hud_telemetry_frametime_show": "1",
-    "cl_hud_telemetry_ping_show": "1"
+    "cl_hud_telemetry_ping_show": "1",
+    "cl_hud_telemetry_net_misdelivery_show": "1",
+    "cl_teamid_overhead_always": "1",
+    "cl_use_opens_buy_menu": "0",
+    "mm_dedicated_search_maxping": "80",
+    "m_rawinput": "1",
+    "m_customaccel": "0",
+    "snd_musicvolume_multiplier": "0",
+    "volume": "0.7"
   },
   "recommendedOptimizationIds": [
     "cs2.cfg.competitive-telemetry",

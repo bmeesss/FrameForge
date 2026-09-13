@@ -42,11 +42,59 @@ public interface IOptimizationScoreService
     Task<OptimizationScore> CalculateAsync(CancellationToken cancellationToken = default);
 }
 
+public interface ICs2SettingCatalog
+{
+    IReadOnlyList<Cs2SettingDefinition> GetAll();
+    Cs2SettingDefinition? GetById(string id);
+    Cs2SettingDefinition? GetByConfigKey(string configKey);
+    IReadOnlyList<Cs2SettingDefinition> GetByCategory(Cs2SettingCategory category);
+}
+
+public interface ICs2SettingsService
+{
+    Task<Cs2SettingsSnapshot> ReadSettingsAsync(CancellationToken cancellationToken = default);
+
+    SettingsValidationResult ValidateSettings(IReadOnlyDictionary<string, string> values);
+
+    SettingsDiff CreateDiff(
+        Cs2SettingsSnapshot current,
+        IReadOnlyDictionary<string, string> desired,
+        string reason,
+        string? profileId = null,
+        string? profileName = null);
+
+    Task<SettingsApplyResult> ApplySettingsAsync(
+        IReadOnlyDictionary<string, string> desired,
+        string reason,
+        string? profileId = null,
+        bool createBackup = true,
+        CancellationToken cancellationToken = default);
+
+    Task<SettingsApplyResult> ApplyDiffAsync(
+        SettingsDiff diff,
+        bool createBackup = true,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Restores the most recent FrameForge settings backup (managed cfg only).
+    /// </summary>
+    Task<SettingsApplyResult> RestoreLastFrameForgeChangesAsync(CancellationToken cancellationToken = default);
+
+    string ManagedConfigFileName { get; }
+}
+
 public interface IProfileService
 {
     Task<IReadOnlyList<PerformanceProfile>> GetProfilesAsync(CancellationToken cancellationToken = default);
     Task<PerformanceProfile?> GetProfileAsync(string profileId, CancellationToken cancellationToken = default);
     Task SaveCustomProfileAsync(PerformanceProfile profile, CancellationToken cancellationToken = default);
+    Task DeleteCustomProfileAsync(string profileId, CancellationToken cancellationToken = default);
+    Task<PerformanceProfile> DuplicateProfileAsync(string sourceProfileId, string? newName = null, CancellationToken cancellationToken = default);
+    Task RenameCustomProfileAsync(string profileId, string newName, CancellationToken cancellationToken = default);
+    Task ExportProfileAsync(string profileId, string destinationPath, CancellationToken cancellationToken = default);
+    Task<ProfileImportResult> ImportProfileAsync(string sourcePath, CancellationToken cancellationToken = default);
+    ProfileValidationResult ValidateProfile(PerformanceProfile profile);
+    IReadOnlyList<string> BuiltInProfileIds { get; }
 }
 
 public interface IAppSettingsService

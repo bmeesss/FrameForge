@@ -58,6 +58,10 @@ public static class Assert
         True(actual is not null && actual.Contains(expectedSubstring, StringComparison.Ordinal),
             $"Expected '{actual}' to contain '{expectedSubstring}'.");
 
+    public static void Contains(string expectedSubstring, string? actual, StringComparison comparison) =>
+        True(actual is not null && actual.Contains(expectedSubstring, comparison),
+            $"Expected '{actual}' to contain '{expectedSubstring}' ({comparison}).");
+
     public static void Contains<T>(IEnumerable<T> collection, Predicate<T> predicate) =>
         True(collection.Any(x => predicate(x)), "Expected collection to contain a matching element.");
 
@@ -65,8 +69,30 @@ public static class Assert
         True(actual is null || !actual.Contains(expectedSubstring, StringComparison.Ordinal),
             $"Expected '{actual}' not to contain '{expectedSubstring}'.");
 
+    public static void DoesNotContain(string expectedSubstring, string? actual, StringComparison comparison) =>
+        True(actual is null || !actual.Contains(expectedSubstring, comparison),
+            $"Expected '{actual}' not to contain '{expectedSubstring}' ({comparison}).");
+
     public static void DoesNotContain<T>(IEnumerable<T> collection, Predicate<T> predicate) =>
         True(!collection.Any(x => predicate(x)), "Expected collection not to contain a matching element.");
+
+    public static void All<T>(IEnumerable<T> collection, Action<T> action)
+    {
+        var index = 0;
+        foreach (var item in collection)
+        {
+            try
+            {
+                action(item);
+            }
+            catch (Exception ex)
+            {
+                throw new XunitException($"Assert.All item[{index}] failed: {ex.Message}");
+            }
+
+            index++;
+        }
+    }
 
     public static void StartsWith(string expected, string? actual) =>
         True(actual is not null && actual.StartsWith(expected, StringComparison.Ordinal),

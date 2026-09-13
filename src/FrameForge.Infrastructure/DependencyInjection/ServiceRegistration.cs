@@ -1,6 +1,7 @@
 using FrameForge.Benchmark;
 using FrameForge.Core.Abstractions;
 using FrameForge.CS2;
+using FrameForge.CS2.Settings;
 using FrameForge.Hardware;
 using FrameForge.Infrastructure.Backup;
 using FrameForge.Infrastructure.Dashboard;
@@ -26,6 +27,8 @@ public static class ServiceRegistration
         services.AddSingleton<IHardwareInfoService, HardwareInfoService>();
         services.AddSingleton<ICs2DetectionService, Cs2DetectionService>();
         services.AddSingleton<ICs2ConfigService, Cs2ConfigService>();
+        services.AddSingleton<ICs2SettingCatalog, Cs2SettingCatalog>();
+        services.AddSingleton<ICs2SettingsService, Cs2SettingsService>();
         services.AddSingleton<IBackupService, BackupService>();
         services.AddSingleton<IProfileService, ProfileService>();
         services.AddSingleton<IOptimizationCatalog, OptimizationCatalog>();

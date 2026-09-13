@@ -40,7 +40,7 @@ public partial class App : Application
         var viewModel = _services.GetRequiredService<MainViewModel>();
         viewModel.SetEnumCollections(Enum.GetValues<LogLevelSetting>(), Enum.GetValues<ThemeSetting>());
 
-        MainWindow = _services.GetRequiredService<MainWindow>();
+        MainWindow = new MainWindow(viewModel);
         MainWindow.Show();
     }
 
