@@ -406,7 +406,7 @@ public sealed class ProfileService : IProfileService
                     ["mm_dedicated_search_maxping"] = "80",
                     ["m_rawinput"] = "1",
                     ["m_customaccel"] = "0",
-                    ["snd_musicvolume_multiplier"] = "0",
+                    ["snd_menumusic_volume"] = "0",
                     ["volume"] = "0.7"
                 },
                 RecommendedOptimizationIds =
@@ -441,7 +441,7 @@ public sealed class ProfileService : IProfileService
                     ["mm_dedicated_search_maxping"] = "120",
                     ["m_rawinput"] = "1",
                     ["m_customaccel"] = "0",
-                    ["snd_musicvolume_multiplier"] = "0.5",
+                    ["snd_menumusic_volume"] = "0.3",
                     ["volume"] = "0.8"
                 },
                 RecommendedOptimizationIds =
@@ -475,7 +475,7 @@ public sealed class ProfileService : IProfileService
                     ["mm_dedicated_search_maxping"] = "150",
                     ["m_rawinput"] = "1",
                     ["m_customaccel"] = "0",
-                    ["snd_musicvolume_multiplier"] = "1",
+                    ["snd_menumusic_volume"] = "0.5",
                     ["volume"] = "1.0"
                 },
                 RecommendedOptimizationIds =

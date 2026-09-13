@@ -239,8 +239,17 @@
                        Foreground="{StaticResource TextSecondaryBrush}"
                        VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="420" />
           </DockPanel>
-          <TextBlock Grid.Row="1" Text="Only documented cfg-backed settings are shown. Changes write to frameforge_settings.cfg and never silently drop unknown user lines."
-                     Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8" />
+          <StackPanel Grid.Row="1" Margin="0,0,0,8">
+            <TextBlock Text="Settings write to frameforge_settings.cfg in the real CS2 cfg folder. autoexec.cfg gets a marked FRAMEFORGE section that execs that file. User lines outside the markers are never removed."
+                       Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding Cs2AffectedFilesHint}"
+                       Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,4,0,0" FontSize="12" />
+            <Border Background="#332F6FED" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"
+                    CornerRadius="6" Padding="10" Margin="0,8,0,0"
+                    Visibility="{Binding HasCs2ExecutionWarning, Converter={StaticResource BoolToVisibilityConverter}}">
+              <TextBlock Text="{Binding Cs2ExecutionRecommendation}" TextWrapping="Wrap" />
+            </Border>
+          </StackPanel>
 
           <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>

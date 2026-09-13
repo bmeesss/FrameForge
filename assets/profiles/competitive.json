@@ -19,7 +19,7 @@
     "mm_dedicated_search_maxping": "80",
     "m_rawinput": "1",
     "m_customaccel": "0",
-    "snd_musicvolume_multiplier": "0",
+    "snd_menumusic_volume": "0",
     "volume": "0.7"
   },
   "recommendedOptimizationIds": [

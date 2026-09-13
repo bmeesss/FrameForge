@@ -97,8 +97,14 @@ public sealed class BackupTests
                 new[] { missing, existing },
                 new Dictionary<string, string?> { ["k"] = "v" });
 
-            Assert.Single(entry.AffectedFiles);
-            Assert.Equal(existing, entry.AffectedFiles[0]);
+            // Existing file is snapshotted; missing path is recorded as CreatedFiles
+            // so restore can delete it if the upcoming apply creates it.
+            Assert.Equal(2, entry.AffectedFiles.Count);
+            Assert.Contains(entry.AffectedFiles, f => f.Equals(existing, StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(entry.AffectedFiles, f => f.Equals(missing, StringComparison.OrdinalIgnoreCase));
+            Assert.Single(entry.FileSnapshots);
+            Assert.Single(entry.CreatedFiles);
+            Assert.Equal(missing, entry.CreatedFiles[0]);
         }
         finally
         {

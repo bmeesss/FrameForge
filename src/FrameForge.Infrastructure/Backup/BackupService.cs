@@ -39,6 +39,7 @@ public sealed class BackupService : IBackupService
 
             var snapshots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var affected = new List<string>();
+            var created = new List<string>();
             var copyFailures = new List<string>();
 
             foreach (var file in affectedFiles.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -51,7 +52,9 @@ public sealed class BackupService : IBackupService
 
                 if (!File.Exists(file))
                 {
-                    // Missing source is not fatal — record absence so restore knows the file was new.
+                    // File will be created by the upcoming apply — record so restore can delete it.
+                    created.Add(file);
+                    affected.Add(file);
                     continue;
                 }
 
@@ -70,7 +73,7 @@ public sealed class BackupService : IBackupService
                 }
             }
 
-            if (copyFailures.Count > 0 && snapshots.Count == 0 && previousValues.Count == 0)
+            if (copyFailures.Count > 0 && snapshots.Count == 0 && created.Count == 0 && previousValues.Count == 0)
             {
                 TryDeleteDirectory(entryDir);
                 throw new IOException(
@@ -86,7 +89,8 @@ public sealed class BackupService : IBackupService
                 AffectedFiles = affected,
                 PreviousValues = previousValues.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase),
                 ProfileId = profileId,
-                FileSnapshots = snapshots
+                FileSnapshots = snapshots,
+                CreatedFiles = created
             };
 
             var store = await LoadStoreAsync(cancellationToken).ConfigureAwait(false);
@@ -184,6 +188,31 @@ public sealed class BackupService : IBackupService
                 {
                     _log.LogError($"Failed to restore '{originalPath}'.", ex);
                     failed.Add(originalPath);
+                }
+            }
+
+            // Delete files that did not exist at backup time (newly created by apply).
+            foreach (var createdPath in entry.CreatedFiles.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (entry.FileSnapshots.ContainsKey(createdPath))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (File.Exists(createdPath))
+                    {
+                        File.Delete(createdPath);
+                        restored.Add(createdPath);
+                        _log.LogInformation($"Removed file created after backup: {createdPath}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _log.LogError($"Failed to remove created file '{createdPath}' on restore.", ex);
+                    failed.Add(createdPath);
                 }
             }
 

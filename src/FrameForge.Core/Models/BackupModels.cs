@@ -13,6 +13,12 @@ public sealed class BackupEntry
     public Dictionary<string, string?> PreviousValues { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     public string? ProfileId { get; init; }
     public Dictionary<string, string> FileSnapshots { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Paths that did not exist when the backup was taken. Restore deletes these files
+    /// so a newly created managed cfg / autoexec returns to the prior absence state.
+    /// </summary>
+    public List<string> CreatedFiles { get; init; } = new();
 }
 
 /// <summary>

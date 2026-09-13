@@ -76,11 +76,18 @@ public interface ICs2SettingsService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Restores the most recent FrameForge settings backup (managed cfg only).
+    /// Restores the most recent FrameForge settings backup (managed cfg + autoexec snapshots).
     /// </summary>
     Task<SettingsApplyResult> RestoreLastFrameForgeChangesAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Detects whether CS2 will execute the managed config (autoexec FRAMEFORGE section).
+    /// Does not modify Steam launch options.
+    /// </summary>
+    Task<Cs2SettingsSnapshot> DetectExecutionStatusAsync(CancellationToken cancellationToken = default);
+
     string ManagedConfigFileName { get; }
+    string AutoexecFileName { get; }
 }
 
 public interface IProfileService

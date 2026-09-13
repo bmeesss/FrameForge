@@ -294,9 +294,17 @@ public sealed class MainViewModel : ViewModelBase
     public string Cs2SettingsStatus =>
         _cs2Snapshot is null
             ? "Not loaded"
-            : _cs2Snapshot.Cs2Available
-                ? _cs2Snapshot.Message
-                : _cs2Snapshot.Message;
+            : _cs2Snapshot.Message;
+
+    public string? Cs2ExecutionRecommendation => _cs2Snapshot?.ExecutionRecommendation;
+
+    public bool HasCs2ExecutionWarning =>
+        !string.IsNullOrWhiteSpace(_cs2Snapshot?.ExecutionRecommendation);
+
+    public string Cs2AffectedFilesHint =>
+        _cs2Snapshot?.AffectedFilesOnApply is { Count: > 0 } files
+            ? "Files FrameForge may modify: " + string.Join(", ", files.Select(Path.GetFileName))
+            : "No CS2 cfg directory detected.";
 
     public IReadOnlyList<LogLevelSetting> LoggingLevels { get; private set; } = Enum.GetValues<LogLevelSetting>();
     public IReadOnlyList<ThemeSetting> Themes { get; private set; } = Enum.GetValues<ThemeSetting>();
@@ -469,6 +477,9 @@ public sealed class MainViewModel : ViewModelBase
         SelectedCategory ??= SettingCategories.FirstOrDefault();
         RebuildSettingRows();
         RaisePropertyChanged(nameof(Cs2SettingsStatus));
+        RaisePropertyChanged(nameof(Cs2ExecutionRecommendation));
+        RaisePropertyChanged(nameof(HasCs2ExecutionWarning));
+        RaisePropertyChanged(nameof(Cs2AffectedFilesHint));
         RaisePropertyChanged(nameof(HasSettingRows));
         RaisePropertyChanged(nameof(ShowEmptySettings));
     }
@@ -586,8 +597,29 @@ public sealed class MainViewModel : ViewModelBase
         }
 
         var sb = new StringBuilder();
-        sb.AppendLine($"Apply {PendingDiff.ChangeCount} setting change(s)?");
+        sb.AppendLine($"Apply {PendingDiff.ChangeCount} change(s) to real CS2 config files?");
         sb.AppendLine();
+        if (PendingDiff.AffectedFiles.Count > 0)
+        {
+            sb.AppendLine("Files that will be modified:");
+            foreach (var f in PendingDiff.AffectedFiles)
+            {
+                sb.AppendLine($"  • {f}");
+            }
+
+            sb.AppendLine();
+        }
+        else if (_cs2Snapshot?.AffectedFilesOnApply is { Count: > 0 } paths)
+        {
+            sb.AppendLine("Files that will be modified:");
+            foreach (var f in paths)
+            {
+                sb.AppendLine($"  • {f}");
+            }
+
+            sb.AppendLine();
+        }
+
         foreach (var e in PendingDiff.Entries.Where(x => x.IsChange).Take(12))
         {
             sb.AppendLine($"• {e.DisplayName}: {e.CurrentValue ?? "(default)"} → {e.NewValue}");
@@ -599,6 +631,7 @@ public sealed class MainViewModel : ViewModelBase
         }
 
         sb.AppendLine();
+        sb.AppendLine("autoexec.cfg only receives a marked // FRAMEFORGE BEGIN…END section (user lines outside markers stay).");
         sb.Append("A backup will be created when automatic backup is enabled.");
 
         var confirm = MessageBox.Show(
@@ -620,9 +653,15 @@ public sealed class MainViewModel : ViewModelBase
             ErrorMessage = null;
             StatusMessage = "Applying settings…";
             var result = await _cs2SettingsService.ApplyDiffAsync(PendingDiff).ConfigureAwait(true);
-            if (result.Success)
+            if (result.Success && result.WrittenFiles.Count > 0)
             {
                 StatusMessage = result.Message + (result.BackupId is null ? "" : $" Backup: {result.BackupId}");
+                PendingDiff = null;
+                PendingDiffSummary = string.Empty;
+            }
+            else if (result.Success)
+            {
+                StatusMessage = result.Message;
                 PendingDiff = null;
                 PendingDiffSummary = string.Empty;
             }
@@ -799,8 +838,22 @@ public sealed class MainViewModel : ViewModelBase
         PendingDiffSummary = $"{diff.ChangeCount} change(s) from profile '{SelectedProfile.Name}'.";
 
         var sb = new StringBuilder();
-        sb.AppendLine($"Apply profile '{SelectedProfile.Name}' ({diff.ChangeCount} change(s))?");
+        sb.AppendLine($"Apply profile '{SelectedProfile.Name}' ({diff.ChangeCount} change(s)) to real CS2 config?");
         sb.AppendLine();
+        var files = diff.AffectedFiles.Count > 0
+            ? diff.AffectedFiles
+            : _cs2Snapshot?.AffectedFilesOnApply ?? Array.Empty<string>();
+        if (files.Count > 0)
+        {
+            sb.AppendLine("Files:");
+            foreach (var f in files)
+            {
+                sb.AppendLine($"  • {f}");
+            }
+
+            sb.AppendLine();
+        }
+
         foreach (var e in diff.Entries.Where(x => x.IsChange).Take(15))
         {
             sb.AppendLine($"• {e.DisplayName}: {e.CurrentValue ?? "(default)"} → {e.NewValue}");
@@ -825,12 +878,18 @@ public sealed class MainViewModel : ViewModelBase
         {
             IsBusy = true;
             var result = await _cs2SettingsService.ApplyDiffAsync(diff).ConfigureAwait(true);
-            if (result.Success)
+            if (result.Success && (result.WrittenFiles.Count > 0 || !diff.HasChanges))
             {
                 Settings.ActiveProfileId = SelectedProfile.Id;
                 await _settingsService.SaveAsync(Settings).ConfigureAwait(true);
                 StatusMessage = result.Message;
                 PendingDiff = null;
+            }
+            else if (result.Success)
+            {
+                // Success with no written files and prior changes expected — treat as incomplete
+                ErrorMessage = "Apply reported success but no CS2 files were written.";
+                StatusMessage = "Profile apply incomplete.";
             }
             else
             {

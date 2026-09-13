@@ -82,6 +82,24 @@ public sealed class Cs2SettingValue
 }
 
 /// <summary>
+/// Whether CS2 will execute the FrameForge managed configuration on launch.
+/// </summary>
+public enum Cs2ConfigExecutionStatus
+{
+    /// <summary>CS2 install / cfg directory not available.</summary>
+    Unavailable,
+
+    /// <summary>Managed file and autoexec FRAMEFORGE section are in place.</summary>
+    Wired,
+
+    /// <summary>Managed file exists but autoexec does not exec it yet.</summary>
+    ManagedFilePresentButNotExecuted,
+
+    /// <summary>No managed file and no autoexec hook.</summary>
+    NotInstalled
+}
+
+/// <summary>
 /// Snapshot of all supported settings resolved from disk.
 /// </summary>
 public sealed class Cs2SettingsSnapshot
@@ -89,9 +107,27 @@ public sealed class Cs2SettingsSnapshot
     public bool Cs2Available { get; init; }
     public string? CfgDirectory { get; init; }
     public string? ManagedConfigPath { get; init; }
+    public string? AutoexecPath { get; init; }
     public string Message { get; init; } = string.Empty;
     public IReadOnlyList<Cs2SettingValue> Settings { get; init; } = Array.Empty<Cs2SettingValue>();
     public DateTimeOffset LoadedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    /// <summary>Whether autoexec contains a FRAMEFORGE section that execs the managed cfg.</summary>
+    public bool AutoexecExecutesManagedConfig { get; init; }
+
+    /// <summary>Whether the managed cfg file exists on disk.</summary>
+    public bool ManagedConfigExists { get; init; }
+
+    public Cs2ConfigExecutionStatus ExecutionStatus { get; init; } = Cs2ConfigExecutionStatus.Unavailable;
+
+    /// <summary>
+    /// Human-readable recommendation when the managed config is not executed by CS2.
+    /// Never auto-injects Steam launch options — advisory only.
+    /// </summary>
+    public string? ExecutionRecommendation { get; init; }
+
+    /// <summary>Real CS2 files FrameForge may modify on the next apply.</summary>
+    public IReadOnlyList<string> AffectedFilesOnApply { get; init; } = Array.Empty<string>();
 
     public IReadOnlyDictionary<string, string?> ToValueMap()
     {
@@ -141,6 +177,12 @@ public sealed class SettingsDiff
     public IReadOnlyList<SettingsDiffEntry> Entries { get; init; } = Array.Empty<SettingsDiffEntry>();
     public int ChangeCount => Entries.Count(e => e.IsChange);
     public bool HasChanges => ChangeCount > 0;
+
+    /// <summary>True when autoexec needs a FRAMEFORGE section / exec hook update.</summary>
+    public bool AutoexecIntegrationChange { get; init; }
+
+    /// <summary>Real paths that will be written (managed cfg and/or autoexec).</summary>
+    public IReadOnlyList<string> AffectedFiles { get; init; } = Array.Empty<string>();
 }
 
 public sealed class SettingsApplyResult
@@ -151,17 +193,31 @@ public sealed class SettingsApplyResult
     public bool RolledBack { get; init; }
     public SettingsDiff? Diff { get; init; }
     public IReadOnlyList<string> WrittenFiles { get; init; } = Array.Empty<string>();
+    public bool AutoexecIntegrationUpdated { get; init; }
+    public bool ManagedConfigExecutedByCs2 { get; init; }
 
-    public static SettingsApplyResult Ok(string message, string? backupId, SettingsDiff diff, IReadOnlyList<string> files) => new()
+    public static SettingsApplyResult Ok(
+        string message,
+        string? backupId,
+        SettingsDiff diff,
+        IReadOnlyList<string> files,
+        bool autoexecUpdated = false,
+        bool executedByCs2 = false) => new()
     {
         Success = true,
         Message = message,
         BackupId = backupId,
         Diff = diff,
-        WrittenFiles = files
+        WrittenFiles = files,
+        AutoexecIntegrationUpdated = autoexecUpdated,
+        ManagedConfigExecutedByCs2 = executedByCs2
     };
 
-    public static SettingsApplyResult Fail(string message, string? backupId = null, bool rolledBack = false, SettingsDiff? diff = null) => new()
+    public static SettingsApplyResult Fail(
+        string message,
+        string? backupId = null,
+        bool rolledBack = false,
+        SettingsDiff? diff = null) => new()
     {
         Success = false,
         Message = message,
