@@ -117,6 +117,9 @@ public sealed class PerformanceIntelligenceService : IPerformanceIntelligenceSer
             }
         }
 
+        // Merge imported evidence archives (fingerprints stay original — never reassigned).
+        await MergeImportedEvidenceAsync(evidence, knownSeed: null, cancellationToken).ConfigureAwait(false);
+
         var records = BuildRecords(evidence, fp);
         var ordered = records
             .OrderByDescending(r => r.IsCurrentSystem)
@@ -124,9 +127,10 @@ public sealed class PerformanceIntelligenceService : IPerformanceIntelligenceSer
             .ToList();
 
         var known = new List<SystemFingerprint> { fp };
+        var knownIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { fp.FingerprintId };
         foreach (var id in ordered.Select(r => r.SystemFingerprintId).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            if (!id.Equals(fp.FingerprintId, StringComparison.OrdinalIgnoreCase))
+            if (knownIds.Add(id))
             {
                 known.Add(new SystemFingerprint
                 {
@@ -138,6 +142,9 @@ public sealed class PerformanceIntelligenceService : IPerformanceIntelligenceSer
                 });
             }
         }
+
+        // Prefer fingerprint objects from import archives when available
+        await EnrichKnownFingerprintsAsync(known, cancellationToken).ConfigureAwait(false);
 
         var index = new PerformanceIntelligenceIndex
         {
@@ -163,6 +170,7 @@ public sealed class PerformanceIntelligenceService : IPerformanceIntelligenceSer
         catch (Exception ex)
         {
             _log.LogWarning($"Could not write performance index: {ex.Message}");
+            TryQuarantineCorruptIndex();
         }
 
         lock (_gate)
@@ -513,4 +521,136 @@ public sealed class PerformanceIntelligenceService : IPerformanceIntelligenceSer
 
         return avg;
     }
+
+    private async Task MergeImportedEvidenceAsync(
+        List<SettingTestEvidence> evidence,
+        List<SystemFingerprint>? knownSeed,
+        CancellationToken cancellationToken)
+    {
+        var importDir = Path.Combine(_paths.PerformanceHistoryDirectory, "imports");
+        if (!Directory.Exists(importDir))
+        {
+            return;
+        }
+
+        var seen = new HashSet<string>(
+            evidence.Select(e => e.GuidedRunId + "|" + e.SettingKey),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in Directory.EnumerateFiles(importDir, "*.json"))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var package = await FrameForgeJson.DeserializeFileAsync<IntelligenceExportPackage>(file, cancellationToken)
+                    .ConfigureAwait(false);
+                if (package?.Evidence is null)
+                {
+                    continue;
+                }
+
+                foreach (var e in package.Evidence)
+                {
+                    if (string.IsNullOrWhiteSpace(e.GuidedRunId) || string.IsNullOrWhiteSpace(e.SettingKey))
+                    {
+                        continue;
+                    }
+
+                    var key = e.GuidedRunId + "|" + e.SettingKey;
+                    if (seen.Add(key))
+                    {
+                        evidence.Add(e);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning($"Skipping corrupt intelligence import '{file}': {ex.Message}");
+                try
+                {
+                    File.Move(file, file + $".corrupt.{DateTime.UtcNow:yyyyMMddHHmmss}");
+                }
+                catch { /* ignore */ }
+            }
+        }
+    }
+
+    private async Task EnrichKnownFingerprintsAsync(
+        List<SystemFingerprint> known,
+        CancellationToken cancellationToken)
+    {
+        var importDir = Path.Combine(_paths.PerformanceHistoryDirectory, "imports");
+        if (!Directory.Exists(importDir))
+        {
+            return;
+        }
+
+        var byId = known.ToDictionary(k => k.FingerprintId, StringComparer.OrdinalIgnoreCase);
+        foreach (var file in Directory.EnumerateFiles(importDir, "*.json"))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var package = await FrameForgeJson.DeserializeFileAsync<IntelligenceExportPackage>(file, cancellationToken)
+                    .ConfigureAwait(false);
+                if (package?.Fingerprints is null)
+                {
+                    continue;
+                }
+
+                foreach (var fp in package.Fingerprints)
+                {
+                    if (string.IsNullOrWhiteSpace(fp.FingerprintId))
+                    {
+                        continue;
+                    }
+
+                    if (!byId.ContainsKey(fp.FingerprintId))
+                    {
+                        known.Add(fp);
+                        byId[fp.FingerprintId] = fp;
+                    }
+                    else if (byId[fp.FingerprintId].CpuModel is "previous-or-unknown" or "unknown")
+                    {
+                        var idx = known.FindIndex(k => k.FingerprintId.Equals(fp.FingerprintId, StringComparison.OrdinalIgnoreCase));
+                        if (idx >= 0)
+                        {
+                            known[idx] = fp;
+                            byId[fp.FingerprintId] = fp;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // already logged in merge
+            }
+        }
+    }
+
+    private void TryQuarantineCorruptIndex()
+    {
+        var path = Path.Combine(_paths.PerformanceHistoryDirectory, PerformanceIntelligenceSchema.IndexFileName);
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            // Only quarantine if file cannot be re-read
+            _ = FrameForgeJson.DeserializeFileAsync<PerformanceIntelligenceIndex>(path, CancellationToken.None)
+                .GetAwaiter().GetResult();
+        }
+        catch
+        {
+            try
+            {
+                File.Move(path, path + $".corrupt.{DateTime.UtcNow:yyyyMMddHHmmss}");
+                _log.LogWarning("Quarantined corrupt performance intelligence index.");
+            }
+            catch { /* ignore */ }
+        }
+    }
+
 }

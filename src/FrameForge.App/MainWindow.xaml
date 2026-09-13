@@ -463,10 +463,16 @@
               <StackPanel>
                 <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Session</TextBlock>
                 <TextBlock Margin="0,0,0,4">
-                  <Run Text="Status:" />
+                  <Run Text="Engine status:" />
                   <Run Text="{Binding BenchmarkStatusText, Mode=OneWay}" FontWeight="SemiBold" />
+                  <Run Text=" · Phase:" />
+                  <Run Text="{Binding BenchmarkPhaseText, Mode=OneWay}" FontWeight="SemiBold" />
                 </TextBlock>
-                <TextBlock Text="{Binding BenchmarkLiveStatus}" TextWrapping="Wrap" Margin="0,0,0,8" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBlock Text="{Binding BenchmarkLiveStatus}" TextWrapping="Wrap" Margin="0,0,0,4" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBlock Text="{Binding BenchmarkProgressDetail}" TextWrapping="Wrap" Margin="0,0,0,4" FontSize="12" />
+                <ProgressBar Height="8" Minimum="0" Maximum="100" Value="{Binding BenchmarkProgressPercent, Mode=OneWay}" Margin="0,0,0,8"
+                             ToolTip="Progress from the live benchmark engine (not a second fake timer)." />
+                <TextBlock Text="{Binding BenchmarkUnavailableNote}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" TextWrapping="Wrap" />
                 <TextBlock Margin="0,0,0,4">
                   <Run Text="Active profile:" />
                   <Run Text="{Binding SelectedProfile.Name, Mode=OneWay, FallbackValue=—}" />
@@ -642,7 +648,7 @@
                   <Button Content="Restore Previous" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RestoreGuidedCommand}" Margin="0,0,8,8" />
                 </WrapPanel>
                 <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" TextWrapping="Wrap"
-                           Text="Confirm Apply is required after the baseline and diff. Keep/Restore appear after comparison. Backup failure aborts apply." />
+                           Text="Confirm Apply is required after the baseline and diff — the progress message lists profile/settings, current→target values, files, backup plan, and risk. Keep/Restore appear after comparison. Backup failure aborts apply. Default dialog focus prefers Cancel/safest action." />
               </StackPanel>
             </Border>
 
@@ -901,11 +907,23 @@
                 <TextBlock Text="{Binding PerformanceIntelStatus}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8" />
                 <TextBlock Text="{Binding GlobalRecommendationBlurb}" TextWrapping="Wrap" Margin="0,0,0,8" />
                 <CheckBox Content="Show all systems (do not mix silently — labels separate fingerprints)" IsChecked="{Binding ShowAllSystemFingerprints}" Margin="0,0,0,8" />
-                <Button Content="Rebuild intelligence cache" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RefreshPerformanceIntelCommand}" HorizontalAlignment="Left" Margin="0,0,0,8" />
+                <Button Content="Rebuild intelligence cache" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RefreshPerformanceIntelCommand}" HorizontalAlignment="Left" Margin="0,0,0,8"
+                        ToolTip="Rebuild local index from guided runs (and validated imports). Quarantines corrupt index files." />
+                <WrapPanel Margin="0,0,0,8">
+                  <Button Content="Export intelligence" Style="{StaticResource NavButtonStyle}" Command="{Binding ExportIntelligenceCommand}" Margin="0,0,8,4" Padding="8,4"
+                          ToolTip="Export .frameforge-intelligence.json (no PII)." />
+                  <Button Content="Export snapshots" Style="{StaticResource NavButtonStyle}" Command="{Binding ExportSnapshotsCommand}" Margin="0,0,8,4" Padding="8,4"
+                          ToolTip="Export .frameforge-snapshots.json setting change log." />
+                  <Button Content="Import package…" Style="{StaticResource NavButtonStyle}" Command="{Binding ImportIntelligenceCommand}" Margin="0,0,8,4" Padding="8,4"
+                          ToolTip="Preview first (default Cancel). Merge or import-as-new only after confirm. Fingerprints stay separate." />
+                </WrapPanel>
                 <WrapPanel>
-                  <Button Content="Assess restore" Style="{StaticResource NavButtonStyle}" Command="{Binding EvaluateTargetedRestoreCommand}" Margin="0,0,8,4" Padding="8,4" />
-                  <Button Content="Restore Setting" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RestoreSettingCommand}" Margin="0,0,8,4" />
-                  <Button Content="Retest this setting" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RetestSettingCommand}" Margin="0,0,8,4" />
+                  <Button Content="Assess restore" Style="{StaticResource NavButtonStyle}" Command="{Binding EvaluateTargetedRestoreCommand}" Margin="0,0,8,4" Padding="8,4"
+                          ToolTip="Re-read managed cfg and latest snapshot before any write." />
+                  <Button Content="Restore Setting" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RestoreSettingCommand}" Margin="0,0,8,4"
+                          ToolTip="{Binding TargetedRestoreHint}" />
+                  <Button Content="Retest this setting" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RetestSettingCommand}" Margin="0,0,8,4"
+                          ToolTip="Runs the existing guided Optimize &amp; Benchmark pipeline for one setting." />
                 </WrapPanel>
                 <TextBlock Text="{Binding TargetedRestoreAssessmentText}" FontSize="12" TextWrapping="Wrap" Margin="0,8,0,0" />
                 <TextBlock Text="{Binding TargetedRestoreHint}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,4,0,0" />

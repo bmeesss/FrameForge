@@ -71,7 +71,12 @@ public sealed class GuidedOptimizationStore : IGuidedOptimizationStore
             }
             catch (Exception ex)
             {
-                _log.LogWarning($"Skipping corrupt guided run '{file}': {ex.Message}");
+                _log.LogWarning($"Skipping corrupt guided run '{file}'; quarantining: {ex.Message}");
+                try
+                {
+                    File.Move(file, file + $".corrupt.{DateTime.UtcNow:yyyyMMddHHmmss}");
+                }
+                catch { /* ignore */ }
             }
         }
 

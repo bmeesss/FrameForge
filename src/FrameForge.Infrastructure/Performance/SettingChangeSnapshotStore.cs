@@ -110,7 +110,13 @@ public sealed class SettingChangeSnapshotStore : ISettingChangeSnapshotStore
         }
         catch (Exception ex)
         {
-            _log.LogWarning($"Corrupt setting-change snapshot store: {ex.Message}");
+            _log.LogWarning($"Corrupt setting-change snapshot store; quarantining: {ex.Message}");
+            try
+            {
+                var q = StorePath + $".corrupt.{DateTime.UtcNow:yyyyMMddHHmmss}";
+                File.Move(StorePath, q);
+            }
+            catch { /* ignore */ }
             return new SettingChangeSnapshotStoreDocument();
         }
     }

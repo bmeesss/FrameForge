@@ -582,10 +582,14 @@ public sealed class CustomOptimizationTests
         public int StartCount { get; private set; }
         public BenchmarkStatus Status { get; private set; } = BenchmarkStatus.Idle;
         public BenchmarkRun? CurrentRun { get; private set; }
+        public BenchmarkProgress? LatestProgress { get; private set; }
         public InMemBenchStore Store { get; } = new();
         public event EventHandler? StatusChanged;
 #pragma warning disable CS0067
         public event EventHandler<BenchmarkSample>? SampleCaptured;
+#pragma warning disable CS0067
+        public event EventHandler<BenchmarkProgress>? ProgressChanged;
+#pragma warning restore CS0067
 #pragma warning restore CS0067
 
         public async Task<BenchmarkRun> StartAsync(BenchmarkConfiguration configuration, CancellationToken cancellationToken = default)

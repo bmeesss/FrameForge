@@ -27,6 +27,8 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
     private BenchmarkRun? _current;
     private bool _stopRequested;
     private bool _cancelRequested;
+    private BenchmarkProgress? _latestProgress;
+    private bool _cs2ExitDetected;
 
     public BenchmarkEngine(
         IPerformanceSampler sampler,
@@ -76,8 +78,14 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
         get { lock (_gate) return _current; }
     }
 
+    public BenchmarkProgress? LatestProgress
+    {
+        get { lock (_gate) return _latestProgress; }
+    }
+
     public event EventHandler? StatusChanged;
     public event EventHandler<BenchmarkSample>? SampleCaptured;
+    public event EventHandler<BenchmarkProgress>? ProgressChanged;
 
     public async Task<BenchmarkRun> StartAsync(
         BenchmarkConfiguration configuration,
@@ -107,6 +115,8 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
             _runCts = linked;
             _stopRequested = false;
             _cancelRequested = false;
+            _cs2ExitDetected = false;
+            _latestProgress = null;
         }
 
         Status = BenchmarkStatus.Preparing;
@@ -128,6 +138,8 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
             _current = run;
         }
 
+        PublishProgress(run, configuration, BenchmarkUiPhase.Preparing, "Preparing benchmark…", 0, false, false);
+
         _log.LogInformation(
             $"Benchmark {run.Id} preparing (duration={configuration.DurationSeconds}s, interval={configuration.SampleIntervalMs}ms, warmup={configuration.WarmupSeconds}s).");
 
@@ -139,27 +151,61 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
 
             bool cancel;
             bool stop;
+            bool cs2Exit;
             lock (_gate)
             {
                 cancel = _cancelRequested;
                 stop = _stopRequested;
+                cs2Exit = _cs2ExitDetected;
             }
 
             if (cancel)
             {
+                PublishProgress(run, configuration, BenchmarkUiPhase.Stopping, "Stopping benchmark…",
+                    (DateTimeOffset.UtcNow - run.StartedAt).TotalSeconds, false,
+                    run.Samples.LastOrDefault()?.Cs2ProcessPresent ?? false);
                 run.Status = BenchmarkStatus.Cancelled;
                 run.Error = "Cancelled by user.";
                 run.EndedAt = DateTimeOffset.UtcNow;
                 run.DurationSecondsActual = (run.EndedAt.Value - run.StartedAt).TotalSeconds;
+                PublishProgress(run, configuration, BenchmarkUiPhase.Analyzing, "Analyzing collected samples…",
+                    run.DurationSecondsActual, false, false);
                 run.Result = _calculator.Calculate(run.Samples);
                 Status = BenchmarkStatus.Cancelled;
+                PublishProgress(run, configuration, BenchmarkUiPhase.Cancelled, "Benchmark cancelled.",
+                    run.DurationSecondsActual, false, false);
             }
-            else
+            else if (cs2Exit)
             {
                 Status = BenchmarkStatus.Stopping;
                 run.Status = BenchmarkStatus.Stopping;
                 run.EndedAt = DateTimeOffset.UtcNow;
                 run.DurationSecondsActual = (run.EndedAt.Value - run.StartedAt).TotalSeconds;
+                PublishProgress(run, configuration, BenchmarkUiPhase.Analyzing, "Analyzing partial samples…",
+                    run.DurationSecondsActual, false, false);
+                run.Result = _calculator.Calculate(run.Samples);
+                run.Result = CloneResultWithNote(run.Result,
+                    "CS2 exited during session. Partial samples only. FrameForge did not restart CS2.");
+                run.Status = BenchmarkStatus.Failed;
+                if (string.IsNullOrWhiteSpace(run.Error))
+                {
+                    run.Error = "CS2 process closed during benchmark.";
+                }
+                Status = BenchmarkStatus.Failed;
+                PublishProgress(run, configuration, BenchmarkUiPhase.Failed, run.Error,
+                    run.DurationSecondsActual, false, false);
+            }
+            else
+            {
+                Status = BenchmarkStatus.Stopping;
+                run.Status = BenchmarkStatus.Stopping;
+                PublishProgress(run, configuration, BenchmarkUiPhase.Finishing, "Finishing benchmark…",
+                    (DateTimeOffset.UtcNow - run.StartedAt).TotalSeconds, false,
+                    run.Samples.LastOrDefault()?.Cs2ProcessPresent ?? false);
+                run.EndedAt = DateTimeOffset.UtcNow;
+                run.DurationSecondsActual = (run.EndedAt.Value - run.StartedAt).TotalSeconds;
+                PublishProgress(run, configuration, BenchmarkUiPhase.Analyzing, "Analyzing result…",
+                    run.DurationSecondsActual, false, false);
                 run.Result = _calculator.Calculate(run.Samples);
                 if (stop)
                 {
@@ -170,6 +216,9 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
 
                 run.Status = BenchmarkStatus.Completed;
                 Status = BenchmarkStatus.Completed;
+                PublishProgress(run, configuration, BenchmarkUiPhase.Completed, "Benchmark completed.",
+                    run.DurationSecondsActual, false,
+                    run.Samples.LastOrDefault()?.Cs2ProcessPresent ?? false);
             }
 
             try
@@ -186,12 +235,17 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _cancelRequested)
         {
+            PublishProgress(run, configuration, BenchmarkUiPhase.Stopping, "Stopping benchmark…",
+                (DateTimeOffset.UtcNow - run.StartedAt).TotalSeconds, false,
+                run.Samples.LastOrDefault()?.Cs2ProcessPresent ?? false);
             run.Status = BenchmarkStatus.Cancelled;
-            run.Error = "Cancelled.";
+            run.Error = "Cancelled by user.";
             run.EndedAt = DateTimeOffset.UtcNow;
             run.DurationSecondsActual = (run.EndedAt.Value - run.StartedAt).TotalSeconds;
             run.Result = _calculator.Calculate(run.Samples);
             Status = BenchmarkStatus.Cancelled;
+            PublishProgress(run, configuration, BenchmarkUiPhase.Cancelled, "Benchmark cancelled.",
+                run.DurationSecondsActual, false, false);
             try { await _store.SaveAsync(run, CancellationToken.None).ConfigureAwait(false); } catch { /* ignore */ }
             return run;
         }
@@ -241,6 +295,18 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
         }
 
         _log.LogInformation("Benchmark cancel requested.");
+        var cur = CurrentRun;
+        if (cur is not null)
+        {
+            PublishProgress(
+                cur,
+                cur.Configuration,
+                BenchmarkUiPhase.Stopping,
+                "Stopping benchmark…",
+                cur.Samples.Count > 0 ? cur.Samples[^1].ElapsedMs / 1000.0 : 0,
+                false,
+                cur.Samples.LastOrDefault()?.Cs2ProcessPresent ?? false);
+        }
     }
 
     public BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after) =>
@@ -255,14 +321,21 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
         var totalMs = configuration.Duration.TotalMilliseconds;
         var warmupMs = configuration.Warmup.TotalMilliseconds;
         var interval = configuration.SampleInterval;
+        var sawCs2 = run.SystemInformation.Cs2ProcessRunningAtStart;
+        var missingCs2Streak = 0;
 
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             bool stop;
-            lock (_gate) { stop = _stopRequested; }
-            if (stop)
+            bool cancel;
+            lock (_gate)
+            {
+                stop = _stopRequested;
+                cancel = _cancelRequested;
+            }
+            if (stop || cancel)
             {
                 break;
             }
@@ -282,6 +355,33 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
             catch (Exception ex)
             {
                 _log.LogDebug($"CS2 process probe failed: {ex.Message}");
+            }
+
+            if (cs2 is not null)
+            {
+                sawCs2 = true;
+                missingCs2Streak = 0;
+            }
+            else if (sawCs2)
+            {
+                missingCs2Streak++;
+                // Require a few consecutive misses to avoid transient probe glitches
+                if (missingCs2Streak >= 3)
+                {
+                    _cs2ExitDetected = true;
+                    run.Error =
+                        "CS2 process closed during benchmark. FrameForge does not restart CS2 automatically. Run stored as Failed.";
+                    _log.LogWarning(run.Error);
+                    PublishProgress(
+                        run,
+                        configuration,
+                        BenchmarkUiPhase.Failed,
+                        run.Error,
+                        elapsed / 1000.0,
+                        isWarmup,
+                        false);
+                    break;
+                }
             }
 
             BenchmarkSample sample;
@@ -305,6 +405,12 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
             run.Samples.Add(sample);
             SampleCaptured?.Invoke(this, sample);
 
+            var phase = isWarmup ? BenchmarkUiPhase.Warmup : BenchmarkUiPhase.Benchmarking;
+            var msg = isWarmup
+                ? $"Warm-up sample {run.Samples.Count(s => s.IsWarmup)}…"
+                : $"Benchmarking sample {run.Samples.Count(s => !s.IsWarmup)}…";
+            PublishProgress(run, configuration, phase, msg, elapsed / 1000.0, isWarmup, cs2 is not null);
+
             var remaining = totalMs - sw.Elapsed.TotalMilliseconds;
             if (remaining <= 0)
             {
@@ -327,6 +433,56 @@ public sealed class BenchmarkEngine : IBenchmarkEngine
             }
         }
     }
+
+    private void PublishProgress(
+        BenchmarkRun run,
+        BenchmarkConfiguration configuration,
+        BenchmarkUiPhase phase,
+        string message,
+        double elapsedSeconds,
+        bool isWarmup,
+        bool cs2Present)
+    {
+        var total = configuration.DurationSeconds;
+        var remaining = total > 0 ? Math.Max(0, total - elapsedSeconds) : (double?)null;
+        double? pct = null;
+        if (total > 0 && phase is not BenchmarkUiPhase.Idle and not BenchmarkUiPhase.Preparing)
+        {
+            pct = Math.Clamp(100.0 * elapsedSeconds / total, 0, 100);
+        }
+
+        var progress = new BenchmarkProgress
+        {
+            EngineStatus = Status,
+            Phase = phase,
+            Message = message,
+            ElapsedSeconds = elapsedSeconds,
+            RemainingSeconds = remaining,
+            SamplesCollected = run.Samples.Count,
+            WarmupSamples = run.Samples.Count(s => s.IsWarmup),
+            MeasuredSamples = run.Samples.Count(s => !s.IsWarmup),
+            SampleIntervalMs = configuration.SampleIntervalMs,
+            PlannedDurationSeconds = configuration.DurationSeconds,
+            WarmupSeconds = configuration.WarmupSeconds,
+            IsWarmup = isWarmup,
+            Cs2ProcessPresent = cs2Present,
+            Cs2ProcessStatus = cs2Present ? "CS2 running" : (sawCs2Hint(run) ? "CS2 not detected" : "CS2 not running"),
+            UnavailableNote =
+                "Frame-time / GPU utilization: Unavailable (no injection / no graphics hook).",
+            ProgressPercent = pct
+        };
+
+        lock (_gate)
+        {
+            _latestProgress = progress;
+        }
+
+        ProgressChanged?.Invoke(this, progress);
+    }
+
+    private static bool sawCs2Hint(BenchmarkRun run) =>
+        run.SystemInformation.Cs2ProcessRunningAtStart ||
+        run.Samples.Any(s => s.Cs2ProcessPresent);
 
     private async Task<BenchmarkSystemSnapshot> CaptureSystemSnapshotAsync(
         BenchmarkConfiguration configuration,

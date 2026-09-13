@@ -18,6 +18,7 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
     private readonly IBenchmarkCalculator _calculator;
     private readonly IGuidedOptimizationStore _store;
     private readonly ISystemFingerprintService? _fingerprint;
+    private readonly IManagedConfigWatcher? _configWatcher;
     private readonly IAppLog _log;
 
     private readonly object _gate = new();
@@ -38,7 +39,8 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
         IBenchmarkCalculator calculator,
         IGuidedOptimizationStore store,
         IAppLog log,
-        ISystemFingerprintService? fingerprint = null)
+        ISystemFingerprintService? fingerprint = null,
+        IManagedConfigWatcher? configWatcher = null)
     {
         _detection = detection;
         _processMonitor = processMonitor;
@@ -49,6 +51,7 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
         _calculator = calculator;
         _store = store;
         _fingerprint = fingerprint;
+        _configWatcher = configWatcher;
         _log = log;
     }
 
@@ -307,7 +310,9 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
             }
 
             // ── Apply (existing settings service: backup → write → verify → rollback) ──
-            SetStatus(run, GuidedOptimizationStatus.Applying, "Creating backup and applying settings…", 50);
+            SetStatus(run, GuidedOptimizationStatus.Applying, "Creating backup…", 48);
+            Report(run, "Creating backup before apply…");
+            SetStatus(run, GuidedOptimizationStatus.Applying, "Applying settings…", 52);
             SettingsApplyResult apply;
             try
             {
@@ -353,6 +358,13 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
             {
                 // Automatic backup disabled — still require a backup for guided safety
                 Report(run, "Warning: apply succeeded without backup id (automatic backup may be off).");
+            }
+
+            SetStatus(run, GuidedOptimizationStatus.Applying, "Verifying applied settings…", 58);
+            if (_configWatcher is not null)
+            {
+                try { await _configWatcher.CaptureBaselineAsync(linked.Token).ConfigureAwait(false); }
+                catch (Exception ex) { _log.LogDebug($"Baseline capture after apply: {ex.Message}"); }
             }
 
             Report(run, $"Applied OK. Backup={apply.BackupId ?? "none"}. Files: {string.Join(", ", apply.WrittenFiles.Select(Path.GetFileName))}");
@@ -750,7 +762,40 @@ public sealed class GuidedOptimizationService : IGuidedOptimizationService
     private static string BuildConfirmMessage(GuidedOptimizationRun run, SettingsDiff diff)
     {
         var files = string.Join(", ", run.AffectedFiles.Select(Path.GetFileName));
-        return $"Confirm apply: {diff.ChangeCount} change(s). Files: {files}. A backup will be created first. Waiting for user confirmation…";
+        if (string.IsNullOrWhiteSpace(files))
+        {
+            files = "(managed cfg + autoexec FRAMEFORGE section)";
+        }
+
+        var name = !string.IsNullOrWhiteSpace(run.CustomSetName)
+            ? run.CustomSetName!
+            : (!string.IsNullOrWhiteSpace(run.ProfileName) ? run.ProfileName! : "Custom selection");
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Confirm apply — {name}");
+        sb.AppendLine($"Settings to change: {diff.ChangeCount}");
+        sb.AppendLine($"Files: {files}");
+        sb.AppendLine("Backup: a full FrameForge backup will be created before any write.");
+        var cfg = run.BenchmarkConfiguration;
+        sb.AppendLine(
+            $"Benchmark plan: baseline {cfg.DurationSeconds}s → apply → post {cfg.DurationSeconds}s " +
+            $"(interval {cfg.SampleIntervalMs}ms, warm-up {cfg.WarmupSeconds}s).");
+        sb.AppendLine("Risk: reversible via backup; FrameForge never injects into CS2.");
+        sb.AppendLine("Changes:");
+        var shown = 0;
+        foreach (var c in diff.Entries.Where(e => e.IsChange).Take(12))
+        {
+            sb.AppendLine($"  • {c.DisplayName} ({c.ConfigKey}): '{c.CurrentValue ?? "—"}' → '{c.NewValue}' [risk: {c.Risk}]");
+            shown++;
+        }
+
+        if (diff.ChangeCount > shown)
+        {
+            sb.AppendLine($"  … and {diff.ChangeCount - shown} more.");
+        }
+
+        sb.Append("Waiting for explicit confirmation…");
+        return sb.ToString();
     }
 
     private static IEnumerable<GuidedConditionWarning> BuildConditionWarnings(BenchmarkRun before, BenchmarkRun after)

@@ -18,6 +18,7 @@ public sealed class TargetedRestoreService : ITargetedRestoreService
     private readonly ICs2ConfigService _config;
     private readonly ICs2SettingCatalog _catalog;
     private readonly IAppLog _log;
+    private readonly IManagedConfigWatcher? _watcher;
 
     public TargetedRestoreService(
         ISettingChangeSnapshotStore snapshots,
@@ -25,7 +26,8 @@ public sealed class TargetedRestoreService : ITargetedRestoreService
         ICs2SettingsService settings,
         ICs2ConfigService config,
         ICs2SettingCatalog catalog,
-        IAppLog log)
+        IAppLog log,
+        IManagedConfigWatcher? watcher = null)
     {
         _snapshots = snapshots;
         _backups = backups;
@@ -33,6 +35,7 @@ public sealed class TargetedRestoreService : ITargetedRestoreService
         _config = config;
         _catalog = catalog;
         _log = log;
+        _watcher = watcher;
     }
 
     public Task<TargetedRestoreAssessment> AssessAsync(
@@ -253,6 +256,37 @@ public sealed class TargetedRestoreService : ITargetedRestoreService
             return TargetedRestoreResult.Refuse(reassess);
         }
 
+        // Refuse if managed files changed externally since last FrameForge baseline
+        if (_watcher is not null)
+        {
+            try
+            {
+                if (await _watcher.HasExternalChangesAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    return TargetedRestoreResult.Refuse(new TargetedRestoreAssessment
+                    {
+                        ConfigKey = key,
+                        SettingId = assessment.SettingId,
+                        SettingName = assessment.SettingName,
+                        Safety = TargetedRestoreSafety.UnsafeToTargetRestore,
+                        Message =
+                            "Managed cfg changed externally since the last FrameForge baseline. " +
+                            "Re-assess after reviewing the file; targeted restore refused.",
+                        LatestSnapshot = assessment.LatestSnapshot,
+                        CurrentValue = assessment.CurrentValue,
+                        RestoreValue = assessment.RestoreValue,
+                        AppliedValue = assessment.AppliedValue,
+                        AffectedFile = assessment.AffectedFile,
+                        PreferFullBackupRestore = true
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning($"External change check failed (continuing with re-assess only): {ex.Message}");
+            }
+        }
+
         // Backup current managed file state first — fail stops
         string? backupId = null;
         try
@@ -359,6 +393,12 @@ public sealed class TargetedRestoreService : ITargetedRestoreService
 
             _log.LogInformation(
                 $"Targeted restore OK: {key} '{assessment.CurrentValue}' → '{assessment.RestoreValue}' (backup {backupId}).");
+
+            if (_watcher is not null)
+            {
+                try { await _watcher.CaptureBaselineAsync(cancellationToken).ConfigureAwait(false); }
+                catch (Exception ex) { _log.LogDebug($"Baseline capture after restore: {ex.Message}"); }
+            }
 
             return TargetedRestoreResult.Ok(
                 key,

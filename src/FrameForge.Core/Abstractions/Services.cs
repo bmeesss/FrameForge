@@ -221,8 +221,10 @@ public interface IBenchmarkEngine
 {
     BenchmarkStatus Status { get; }
     BenchmarkRun? CurrentRun { get; }
+    BenchmarkProgress? LatestProgress { get; }
     event EventHandler? StatusChanged;
     event EventHandler<BenchmarkSample>? SampleCaptured;
+    event EventHandler<BenchmarkProgress>? ProgressChanged;
 
     Task<BenchmarkRun> StartAsync(BenchmarkConfiguration configuration, CancellationToken cancellationToken = default);
     void RequestStop();
@@ -353,4 +355,42 @@ public interface ITargetedRestoreService
     Task<TargetedRestoreBatchResult> RestoreSetAsync(
         IEnumerable<string> settingIdsOrKeys,
         CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Local export/import of performance intelligence and setting snapshots.
+/// No network; validates before write; never executes imported content.
+/// </summary>
+public interface IIntelligenceExportService
+{
+    Task<IntelligenceExportPackage> BuildExportAsync(CancellationToken cancellationToken = default);
+    Task ExportIntelligenceAsync(string destinationPath, CancellationToken cancellationToken = default);
+    Task ExportSnapshotsAsync(string destinationPath, CancellationToken cancellationToken = default);
+    Task<IntelligenceImportPreview> PreviewImportAsync(string sourcePath, CancellationToken cancellationToken = default);
+    Task<IntelligenceImportResult> ImportAsync(
+        string sourcePath,
+        IntelligenceImportMode mode,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Lightweight watch of FrameForge-managed cfg files. One centralized service.
+/// Invalidates targeted-restore safety when external edits are detected.
+/// </summary>
+public interface IManagedConfigWatcher : IDisposable
+{
+    bool IsWatching { get; }
+    event EventHandler<ExternalConfigChangeEventArgs>? ExternalChangeDetected;
+
+    /// <summary>Start watching known managed paths (cfg dir from detection).</summary>
+    Task StartAsync(CancellationToken cancellationToken = default);
+    void Stop();
+
+    /// <summary>Capture current hashes after a FrameForge-owned write.</summary>
+    Task CaptureBaselineAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>True if managed files differ from last FrameForge baseline.</summary>
+    Task<bool> HasExternalChangesAsync(CancellationToken cancellationToken = default);
+
+    Task InvalidateRestoreCacheAsync();
 }

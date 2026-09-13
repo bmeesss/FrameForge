@@ -24,10 +24,15 @@ It analyzes your PC and CS2 installation, recommends **safe** optimizations, man
 - **Guided Optimize & Benchmark** — orchestrated baseline → preview → **explicit confirm** → backup → apply → verify → post-benchmark → compare → Keep|Restore. Uses the same settings apply path only. Local guided-run history. **No FPS guarantees.**
 - **Custom / individual optimization** — pick single or multiple supported CS2 settings (or a full profile). In-memory search/filter, custom sets, save-as-profile via existing profile system, guided A/B through Phase 5 service. **Recommended ≠ measured.**
 - **Performance intelligence** — learns only from **local** guided benchmark history. Per-setting records, confidence heuristics, single vs multi-setting evidence, system fingerprint (no PII). **No telemetry. No FPS guarantees.**
-- **Safe targeted restore** — restores individual FrameForge-managed keys only when assessment proves safety; refuses user-changed values. Never silent full-backup fallback.
+- **Safe targeted restore** — restores individual FrameForge-managed keys only when assessment proves safety; refuses user-changed values. Never silent full-backup fallback. Re-checks managed files before write; external cfg changes invalidate assessments.
 - **One-click retest** — re-runs a single setting through the existing guided optimize & benchmark workflow from Performance History / Custom Optimization.
+- **Benchmark UX (Phase 9)** — live phase/elapsed/remaining/samples/interval/warm-up/CS2 status from the engine only (Preparing → Warm-up → Benchmarking → Finishing → Analyzing → Completed). Cancel shows Stopping… then cancelled. CS2 exit mid-run fails safely with a clear explanation and **never** auto-restarts CS2. Unavailable metrics stay labeled Unavailable.
+- **Guided confirm detail** — confirmation lists profile/name, setting count, files, current→target values, backup plan, bench plan, and risk before apply; apply phases message Creating backup / Applying / Verifying.
+- **Intelligence export/import** — `.frameforge-intelligence.json` and `.frameforge-snapshots.json`; no PII; validate + preview (default) then merge or import-as-new; imported fingerprints stay labeled Different system — never silently merged into the current machine.
+- **External cfg detection** — lightweight watcher on `frameforge_settings.cfg` and the autoexec FRAMEFORGE section only; hashes managed content; user lines outside markers do not invalidate restore safety.
+- **History reliability** — AtomicFile for history writes; corrupt JSON quarantined (not silent delete); intelligence index rebuilds from guided run files when needed.
 - **Logging** — structured local logs; secrets redacted.
-- **UI** — dark WPF shell with loading/empty/error states and confirmation dialogs. Execution status warning when the managed cfg is not wired into autoexec. Benchmark page with live sample timeline. Optimize & Benchmark page with step progress and Keep/Restore. Custom Optimization picker page.
+- **UI** — dark WPF shell with loading/empty/error states and confirmation dialogs. Execution status warning when the managed cfg is not wired into autoexec. Benchmark page with live sample timeline. Optimize & Benchmark page with step progress and Keep/Restore. Custom Optimization picker page. Tooltips on restore/import; dialogs default focus to safest action (Cancel).
 
 ## How FrameForge modifies CS2 configuration
 

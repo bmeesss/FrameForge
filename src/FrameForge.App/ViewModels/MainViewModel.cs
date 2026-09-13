@@ -30,6 +30,8 @@ public sealed class MainViewModel : ViewModelBase
     private readonly IPerformanceIntelligenceService _perfIntel;
     private readonly ITargetedRestoreEvaluator _targetedRestore;
     private readonly ITargetedRestoreService _targetedRestoreService;
+    private readonly IIntelligenceExportService _intelExport;
+    private readonly IManagedConfigWatcher _configWatcher;
     private readonly IAppLog _log;
 
     private string _currentPage = "Home";
@@ -65,6 +67,8 @@ public sealed class MainViewModel : ViewModelBase
         IPerformanceIntelligenceService perfIntel,
         ITargetedRestoreEvaluator targetedRestore,
         ITargetedRestoreService targetedRestoreService,
+        IIntelligenceExportService intelExport,
+        IManagedConfigWatcher configWatcher,
         IAppLog log)
     {
         _dashboardService = dashboardService;
@@ -86,6 +90,8 @@ public sealed class MainViewModel : ViewModelBase
         _perfIntel = perfIntel;
         _targetedRestore = targetedRestore;
         _targetedRestoreService = targetedRestoreService;
+        _intelExport = intelExport;
+        _configWatcher = configWatcher;
         _log = log;
         _guided.StatusChanged += (_, _) =>
         {
@@ -130,7 +136,25 @@ public sealed class MainViewModel : ViewModelBase
                 Label = sample.SystemCpuPercent is not null ? "CPU%" : (sample.ProcessCpuPercent is not null ? "ProcCPU%" : "n/a")
             });
             RaisePropertyChanged(nameof(HasBenchmarkChart));
-            BenchmarkLiveStatus = $"t={sample.ElapsedMs/1000:0.0}s  CPU={(sample.SystemCpuPercent?.ToString("0.0") ?? "—")}%  CS2={(sample.Cs2ProcessPresent ? "yes" : "no")}";
+        };
+        _benchmarkEngine.ProgressChanged += (_, progress) =>
+        {
+            ApplyBenchmarkProgress(progress);
+        };
+        _configWatcher.ExternalChangeDetected += (_, e) =>
+        {
+            if (e.UserSectionOnly)
+            {
+                return;
+            }
+
+            StatusMessage = e.Message;
+            // Invalidate restore UI assessment
+            _lastTargetedAssessment = null;
+            TargetedRestoreAssessmentText = "Re-assess required — managed cfg may have changed externally.";
+            RaisePropertyChanged(nameof(CanTargetedRestore));
+            RaisePropertyChanged(nameof(TargetedRestoreHint));
+            RaiseCanExecutes();
         };
 
         NavigateCommand = new RelayCommand(p =>
@@ -180,7 +204,13 @@ public sealed class MainViewModel : ViewModelBase
 
         StartBenchmarkCommand = new AsyncRelayCommand(StartBenchmarkAsync, () => !IsBenchmarkRunning);
         StopBenchmarkCommand = new RelayCommand(() => _benchmarkEngine.RequestStop(), () => IsBenchmarkRunning);
-        CancelBenchmarkCommand = new RelayCommand(() => _benchmarkEngine.RequestCancel(), () => IsBenchmarkRunning);
+        CancelBenchmarkCommand = new RelayCommand(() =>
+        {
+            BenchmarkLiveStatus = "Stopping benchmark…";
+            BenchmarkPhaseText = "Stopping";
+            StatusMessage = "Stopping benchmark…";
+            _benchmarkEngine.RequestCancel();
+        }, () => IsBenchmarkRunning);
         RefreshBenchmarkHistoryCommand = new AsyncRelayCommand(LoadBenchmarkHistoryAsync, () => !IsBusy);
         CompareBenchmarksCommand = new RelayCommand(CompareSelectedBenchmarks, () => SelectedBenchmarkA is not null && SelectedBenchmarkB is not null);
         ExportBenchmarkJsonCommand = new AsyncRelayCommand(ExportBenchmarkJsonAsync, () => SelectedBenchmarkA is not null);
@@ -245,6 +275,9 @@ public sealed class MainViewModel : ViewModelBase
         EvaluateTargetedRestoreCommand = new AsyncRelayCommand(EvaluateTargetedRestoreAsync, () => !IsBusy && (HasCustomSelection || SelectedPerformanceRecord is not null));
         RestoreSettingCommand = new AsyncRelayCommand(RestoreSettingAsync, () => !IsBusy && CanTargetedRestore);
         RetestSettingCommand = new AsyncRelayCommand(RetestSettingAsync, () => !IsGuidedRunning && !IsBenchmarkRunning && (HasCustomSelection || SelectedPerformanceRecord is not null));
+        ExportIntelligenceCommand = new AsyncRelayCommand(ExportIntelligenceAsync, () => !IsBusy);
+        ExportSnapshotsCommand = new AsyncRelayCommand(ExportSnapshotsAsync, () => !IsBusy);
+        ImportIntelligenceCommand = new AsyncRelayCommand(ImportIntelligenceAsync, () => !IsBusy);
     }
 
     public ObservableCollection<OptimizationListItem> Optimizations { get; } = new();
@@ -646,6 +679,9 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand SelectPerformanceSettingCommand { get; }
     public ICommand ComparePerformanceEvidenceCommand { get; }
     public ICommand EvaluateTargetedRestoreCommand { get; }
+    public ICommand ExportIntelligenceCommand { get; }
+    public ICommand ExportSnapshotsCommand { get; }
+    public ICommand ImportIntelligenceCommand { get; }
 
     public string PerformanceFingerprintSummary
     {
@@ -916,6 +952,32 @@ public sealed class MainViewModel : ViewModelBase
     }
     private string _benchmarkLiveStatus = "Idle — external OS counters only (no CS2 injection).";
 
+    public string BenchmarkPhaseText
+    {
+        get => _benchmarkPhaseText;
+        set => SetProperty(ref _benchmarkPhaseText, value);
+    }
+    private string _benchmarkPhaseText = "Idle";
+
+    public string BenchmarkProgressDetail
+    {
+        get => _benchmarkProgressDetail;
+        set => SetProperty(ref _benchmarkProgressDetail, value);
+    }
+    private string _benchmarkProgressDetail = string.Empty;
+
+    public double BenchmarkProgressPercent
+    {
+        get => _benchmarkProgressPercent;
+        set => SetProperty(ref _benchmarkProgressPercent, value);
+    }
+    private double _benchmarkProgressPercent;
+
+    public bool HasBenchmarkProgress => IsBenchmarkRunning || BenchmarkProgressPercent > 0;
+
+    public string BenchmarkUnavailableNote { get; } =
+        "Frame-time / GPU utilization: Unavailable (no injection / no graphics hook).";
+
     public BenchmarkRun? LastCompletedBenchmark
     {
         get => _lastCompletedBenchmark;
@@ -1117,6 +1179,7 @@ public sealed class MainViewModel : ViewModelBase
             await RefreshPerformanceIntelAsync().ConfigureAwait(true);
 
             _hasLoaded = true;
+            try { await _configWatcher.StartAsync().ConfigureAwait(true); } catch { /* optional */ }
             RaisePropertyChanged(nameof(HasOptimizations));
             RaisePropertyChanged(nameof(HasProfiles));
             RaisePropertyChanged(nameof(HasBackups));
@@ -3144,6 +3207,153 @@ Full backup restore is a separate explicit action on the Backups page.",
             _log.LogWarning($"Benchmark history load failed: {ex.Message}");
         }
     }
+
+
+    private void ApplyBenchmarkProgress(BenchmarkProgress progress)
+    {
+        BenchmarkPhaseText = progress.Phase.ToString();
+        BenchmarkLiveStatus = progress.Message;
+        if (progress.ProgressPercent is double pct)
+        {
+            BenchmarkProgressPercent = pct;
+        }
+
+        var remain = progress.RemainingSeconds is double r ? $"{r:0.0}s remaining" : "—";
+        BenchmarkProgressDetail =
+            $"Phase: {progress.Phase} · Elapsed {progress.ElapsedSeconds:0.0}s · {remain} · " +
+            $"Samples {progress.SamplesCollected} (warm-up {progress.WarmupSamples}, measured {progress.MeasuredSamples}) · " +
+            $"Interval {progress.SampleIntervalMs}ms · Warm-up {progress.WarmupSeconds}s · {progress.Cs2ProcessStatus}";
+        if (!string.IsNullOrWhiteSpace(progress.UnavailableNote))
+        {
+            BenchmarkProgressDetail += " · " + progress.UnavailableNote;
+        }
+
+        RaisePropertyChanged(nameof(HasBenchmarkProgress));
+        RaisePropertyChanged(nameof(BenchmarkStatusText));
+        RaisePropertyChanged(nameof(IsBenchmarkRunning));
+    }
+
+    private async Task ExportIntelligenceAsync()
+    {
+        var dialog = new SaveFileDialog
+        {
+            Filter = "FrameForge intelligence (*.frameforge-intelligence.json)|*.frameforge-intelligence.json|JSON (*.json)|*.json",
+            FileName = $"frameforge-intelligence-{DateTime.Now:yyyyMMdd-HHmm}",
+            AddExtension = true,
+            DefaultExt = "frameforge-intelligence.json"
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            StatusMessage = "Export cancelled.";
+            return;
+        }
+
+        try
+        {
+            await _intelExport.ExportIntelligenceAsync(dialog.FileName).ConfigureAwait(true);
+            StatusMessage = "Intelligence exported (no PII).";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+
+    private async Task ExportSnapshotsAsync()
+    {
+        var dialog = new SaveFileDialog
+        {
+            Filter = "FrameForge snapshots (*.frameforge-snapshots.json)|*.frameforge-snapshots.json|JSON (*.json)|*.json",
+            FileName = $"frameforge-snapshots-{DateTime.Now:yyyyMMdd-HHmm}",
+            AddExtension = true,
+            DefaultExt = "frameforge-snapshots.json"
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            StatusMessage = "Export cancelled.";
+            return;
+        }
+
+        try
+        {
+            await _intelExport.ExportSnapshotsAsync(dialog.FileName).ConfigureAwait(true);
+            StatusMessage = "Setting snapshots exported.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+
+    private async Task ImportIntelligenceAsync()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Filter =
+                "FrameForge packages (*.frameforge-intelligence.json;*.frameforge-snapshots.json)|*.frameforge-intelligence.json;*.frameforge-snapshots.json|JSON (*.json)|*.json",
+            CheckFileExists = true
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            StatusMessage = "Import cancelled.";
+            return;
+        }
+
+        try
+        {
+            var preview = await _intelExport.PreviewImportAsync(dialog.FileName).ConfigureAwait(true);
+            if (!preview.IsValid)
+            {
+                ErrorMessage = "Import validation failed: " + string.Join("; ", preview.Errors.Take(8));
+                StatusMessage = "Import rejected.";
+                return;
+            }
+
+            var fpNote = preview.DifferentFingerprints.Count > 0
+                ? $"\nDifferent system fingerprints: {preview.DifferentFingerprints.Count} (kept separate — never merged into current machine)."
+                : "\nAll fingerprints match current system or are unlabeled.";
+
+            var summary =
+                $"Preview (default — no write yet):\n" +
+                $"Add {preview.RecordsToAdd}, update {preview.RecordsToUpdate}, skip {preview.RecordsToSkip}, " +
+                $"evidence +{preview.EvidenceToAdd}, snapshots +{preview.SnapshotsToAdd}, conflicts {preview.Conflicts}." +
+                fpNote +
+                "\n\nYes = Merge after confirm\nNo = Import as new history\nCancel = preview only (no changes)";
+
+            var choice = MessageBox.Show(
+                summary,
+                "Import intelligence — safest action is Cancel",
+                MessageBoxButton.YesNoCancel,
+                MessageBoxImage.Question,
+                MessageBoxResult.Cancel);
+
+            if (choice == MessageBoxResult.Cancel)
+            {
+                StatusMessage = "Preview only — no import written.";
+                return;
+            }
+
+            var mode = choice == MessageBoxResult.Yes
+                ? IntelligenceImportMode.Merge
+                : IntelligenceImportMode.ImportAsNew;
+
+            var result = await _intelExport.ImportAsync(dialog.FileName, mode).ConfigureAwait(true);
+            if (!result.Success)
+            {
+                ErrorMessage = result.Message;
+                StatusMessage = "Import failed.";
+                return;
+            }
+
+            StatusMessage = result.Message;
+            await RefreshPerformanceIntelAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+
 
     private async Task StartBenchmarkAsync()
     {
