@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using FrameForge.Core.IO;
 
 namespace FrameForge.Core.Json;
 
@@ -34,32 +35,14 @@ public static class FrameForgeJson
     public static async Task<T?> DeserializeFileAsync<T>(string path, CancellationToken cancellationToken = default)
     {
         await using var stream = File.OpenRead(path);
-        return await JsonSerializer.DeserializeAsync<T>(stream, Options, cancellationToken);
+        return await JsonSerializer.DeserializeAsync<T>(stream, Options, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public static async Task SerializeFileAsync<T>(string path, T value, CancellationToken cancellationToken = default)
     {
-        var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        var tempPath = path + ".tmp";
-        await using (var stream = File.Create(tempPath))
-        {
-            await JsonSerializer.SerializeAsync(stream, value, Options, cancellationToken);
-            await stream.FlushAsync(cancellationToken);
-        }
-
-        // Atomic replace where the OS supports it
-        if (File.Exists(path))
-        {
-            File.Replace(tempPath, path, destinationBackupFileName: null);
-        }
-        else
-        {
-            File.Move(tempPath, path);
-        }
+        var json = Serialize(value);
+        await AtomicFile.WriteAllTextAsync(path, json, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
     }
 }

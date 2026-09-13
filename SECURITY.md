@@ -20,20 +20,29 @@ FrameForge **must never**:
 Allowed functionality is limited to:
 
 - External hardware / OS information queries
-- Steam library and CS2 install path detection
+- Steam library and CS2 install path detection (filesystem + optional registry read of Steam install path)
 - Documented CS2 configuration file read/write with backups
 - User-approved system recommendations that can be reverted
 - Local logging and backup/restore of user files
 
+## Configuration & backup safety
+
+- Existing user files are never overwritten without a side-car or catalog backup first
+- Writes use temp-file + replace where the OS allows
+- Unknown cfg lines and comments are preserved
+- User keys are not silently deleted on revert when a full file snapshot is unavailable
+- Corrupted backup metadata is quarantined; the app continues with an empty store
+
+## Logging hygiene
+
+Logs must not contain passwords, tokens, API keys, or memory dumps. The file logger redacts common secret assignment patterns.
+
 ## Reporting vulnerabilities
 
-If you discover a security issue in FrameForge (for example path traversal in backup restore, unsafe file writes, or accidental introduction of process injection):
+If you discover a security issue (for example path traversal in backup restore, unsafe file writes, or accidental introduction of process injection):
 
 1. **Do not** open a public issue with exploit details.
-2. Email or privately message the maintainers with:
-   - A clear description of the issue
-   - Steps to reproduce
-   - Impact assessment
+2. Contact the maintainers privately with description, reproduction steps, and impact.
 3. Allow reasonable time for a fix before public disclosure.
 
 ## Safe contribution rules
@@ -45,4 +54,4 @@ When adding optimizations:
 - Prefer advisory recommendations over automatic system changes
 - Always implement `Revert()` and backup metadata
 - Do not use undocumented CS2 keys without evidence they are user-facing config
-- Never log passwords, tokens, or hardware identifiers beyond what is needed for support
+- Never log secrets or unnecessary hardware identifiers

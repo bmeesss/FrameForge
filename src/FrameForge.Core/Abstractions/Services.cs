@@ -33,8 +33,13 @@ public interface IBackupService
 
     Task<IReadOnlyList<BackupEntry>> ListBackupsAsync(CancellationToken cancellationToken = default);
     Task<BackupEntry?> GetBackupAsync(string backupId, CancellationToken cancellationToken = default);
-    Task RestoreAsync(string backupId, CancellationToken cancellationToken = default);
+    Task<BackupRestoreResult> RestoreAsync(string backupId, CancellationToken cancellationToken = default);
     Task DeleteAsync(string backupId, CancellationToken cancellationToken = default);
+}
+
+public interface IOptimizationScoreService
+{
+    Task<OptimizationScore> CalculateAsync(CancellationToken cancellationToken = default);
 }
 
 public interface IProfileService

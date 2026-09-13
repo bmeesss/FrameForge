@@ -10,6 +10,8 @@ public sealed class DashboardService : IDashboardService
     private readonly IOptimizationCatalog _catalog;
     private readonly IProfileService _profiles;
     private readonly IAppSettingsService _settings;
+    private readonly IBackupService _backups;
+    private readonly IOptimizationScoreService _scoreService;
     private readonly IAppLog _log;
 
     public DashboardService(
@@ -18,6 +20,8 @@ public sealed class DashboardService : IDashboardService
         IOptimizationCatalog catalog,
         IProfileService profiles,
         IAppSettingsService settings,
+        IBackupService backups,
+        IOptimizationScoreService scoreService,
         IAppLog log)
     {
         _hardware = hardware;
@@ -25,6 +29,8 @@ public sealed class DashboardService : IDashboardService
         _catalog = catalog;
         _profiles = profiles;
         _settings = settings;
+        _backups = backups;
+        _scoreService = scoreService;
         _log = log;
     }
 
@@ -35,15 +41,17 @@ public sealed class DashboardService : IDashboardService
         var hardwareTask = _hardware.GetHardwareInfoAsync(cancellationToken);
         var cs2Task = _cs2.DetectAsync(cancellationToken);
         var settingsTask = _settings.LoadAsync(cancellationToken);
+        var backupsTask = _backups.ListBackupsAsync(cancellationToken);
+        var scoreTask = _scoreService.CalculateAsync(cancellationToken);
 
-        await Task.WhenAll(hardwareTask, cs2Task, settingsTask).ConfigureAwait(false);
+        await Task.WhenAll(hardwareTask, cs2Task, settingsTask, backupsTask, scoreTask).ConfigureAwait(false);
 
-        var settings = settingsTask.Result;
+        var settings = await settingsTask.ConfigureAwait(false);
         var profile = settings.ActiveProfileId is null
             ? null
             : await _profiles.GetProfileAsync(settings.ActiveProfileId, cancellationToken).ConfigureAwait(false);
 
-        var available = 0;
+        var applicable = 0;
         foreach (var opt in _catalog.GetAll())
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -51,7 +59,7 @@ public sealed class DashboardService : IDashboardService
             {
                 if (await opt.CanApplyAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    available++;
+                    applicable++;
                 }
             }
             catch
@@ -60,17 +68,26 @@ public sealed class DashboardService : IDashboardService
             }
         }
 
-        // Also count advisory recommendations so the dashboard is useful when CS2 is missing
-        var recommendationCount = Math.Max(available, _catalog.GetAll().Count);
+        var totalRecommendations = _catalog.GetAll().Count;
+        var cs2 = await cs2Task.ConfigureAwait(false);
+        var backups = await backupsTask.ConfigureAwait(false);
+        var score = await scoreTask.ConfigureAwait(false);
+
+        var status = cs2.IsInstalled
+            ? (applicable > 0 ? "Recommendations available" : "Analyzed — no pending applicable tweaks")
+            : "CS2 not detected";
 
         return new DashboardSnapshot
         {
-            Hardware = hardwareTask.Result,
-            Cs2 = cs2Task.Result,
-            OptimizationStatus = available > 0 ? "Recommendations available" : "Analyzed",
-            AvailableRecommendationCount = recommendationCount,
+            Hardware = await hardwareTask.ConfigureAwait(false),
+            Cs2 = cs2,
+            OptimizationStatus = status,
+            AvailableRecommendationCount = totalRecommendations,
+            ApplicableOptimizationCount = applicable,
             AppliedOptimizationCount = 0,
+            BackupCount = backups.Count,
             ActiveProfileName = profile?.Name,
+            Score = score,
             GeneratedAt = DateTimeOffset.UtcNow
         };
     }

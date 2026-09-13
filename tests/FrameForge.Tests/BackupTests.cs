@@ -33,7 +33,6 @@ public sealed class BackupTests
             Assert.Equal("400", entry.PreviousValues["fps_max"]);
 
             var listed = await service.ListBackupsAsync();
-            Assert.Contains(listed, b => b.Id == entry.Id);
             Assert.True(listed.Any(b => b.Id == entry.Id));
         }
         finally
@@ -43,7 +42,7 @@ public sealed class BackupTests
     }
 
     [Fact]
-    public async Task RestoreBackup_RestoresFileContents()
+    public async Task RestoreBackup_RestoresExactContent()
     {
         var root = NewTempRoot();
         try
@@ -53,7 +52,9 @@ public sealed class BackupTests
             var service = new BackupService(paths, log);
 
             var file = Path.Combine(root, "game.cfg");
-            await File.WriteAllTextAsync(file, "original-value");
+            var original = "original-value\nline2\n" + new string('x', 4096);
+            await File.WriteAllTextAsync(file, original);
+            var originalBytes = await File.ReadAllBytesAsync(file);
 
             var entry = await service.CreateBackupAsync(
                 "restore-test",
@@ -64,8 +65,85 @@ public sealed class BackupTests
             await File.WriteAllTextAsync(file, "modified-value");
             Assert.Equal("modified-value", await File.ReadAllTextAsync(file));
 
-            await service.RestoreAsync(entry.Id);
-            Assert.Equal("original-value", await File.ReadAllTextAsync(file));
+            var restore = await service.RestoreAsync(entry.Id);
+            Assert.True(restore.Success, restore.Message);
+            Assert.Single(restore.RestoredFiles);
+
+            var restoredBytes = await File.ReadAllBytesAsync(file);
+            Assert.Equal(originalBytes.Length, restoredBytes.Length);
+            Assert.True(originalBytes.SequenceEqual(restoredBytes));
+        }
+        finally
+        {
+            DeleteQuietly(root);
+        }
+    }
+
+    [Fact]
+    public async Task CreateBackup_SkipsMissingSourceFiles()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var paths = new PathService(root);
+            var service = new BackupService(paths, new FileAppLog(paths));
+            var missing = Path.Combine(root, "does-not-exist.cfg");
+            var existing = Path.Combine(root, "exists.cfg");
+            await File.WriteAllTextAsync(existing, "ok");
+
+            var entry = await service.CreateBackupAsync(
+                "partial",
+                new[] { "id" },
+                new[] { missing, existing },
+                new Dictionary<string, string?> { ["k"] = "v" });
+
+            Assert.Single(entry.AffectedFiles);
+            Assert.Equal(existing, entry.AffectedFiles[0]);
+        }
+        finally
+        {
+            DeleteQuietly(root);
+        }
+    }
+
+    [Fact]
+    public async Task Restore_UnknownBackup_ReturnsFailure()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var paths = new PathService(root);
+            var service = new BackupService(paths, new FileAppLog(paths));
+            var result = await service.RestoreAsync("bak_does_not_exist");
+            Assert.False(result.Success);
+            Assert.Contains("not found", result.Message);
+        }
+        finally
+        {
+            DeleteQuietly(root);
+        }
+    }
+
+    [Fact]
+    public async Task CorruptedMetadata_IsQuarantinedAndServiceContinues()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var paths = new PathService(root);
+            Directory.CreateDirectory(paths.BackupsDirectory);
+            await File.WriteAllTextAsync(paths.BackupMetadataPath, "{ not-json !!!");
+
+            var service = new BackupService(paths, new FileAppLog(paths));
+            var listed = await service.ListBackupsAsync();
+            Assert.Empty(listed);
+
+            // Should still allow creating a new backup
+            var file = Path.Combine(root, "a.cfg");
+            await File.WriteAllTextAsync(file, "x");
+            var entry = await service.CreateBackupAsync("after-corrupt", new[] { "id" }, new[] { file },
+                new Dictionary<string, string?>());
+            Assert.False(string.IsNullOrWhiteSpace(entry.Id));
         }
         finally
         {
@@ -89,7 +167,6 @@ public sealed class BackupTests
 
             await service.DeleteAsync(entry.Id);
             var listed = await service.ListBackupsAsync();
-            Assert.DoesNotContain(listed, b => b.Id == entry.Id);
             Assert.True(listed.All(b => b.Id != entry.Id));
         }
         finally

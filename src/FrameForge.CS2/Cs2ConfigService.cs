@@ -1,14 +1,16 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using FrameForge.Core.Abstractions;
+using FrameForge.Core.IO;
 using FrameForge.Core.Models;
 
 namespace FrameForge.CS2;
 
 /// <summary>
 /// Reads and writes documented CS2 configuration files (cfg).
-/// Always creates a backup before overwrite (caller / pipeline also backs up).
-/// Uses atomic writes where practical.
+/// Always creates a backup before overwrite when a file already exists.
+/// Uses atomic writes where practical. Preserves comments and unknown lines.
+/// Never silently deletes user configuration.
 /// </summary>
 public sealed class Cs2ConfigService : ICs2ConfigService
 {
@@ -33,9 +35,26 @@ public sealed class Cs2ConfigService : ICs2ConfigService
             return new Cs2ConfigDocument { FilePath = filePath };
         }
 
-        var content = await File.ReadAllTextAsync(filePath, Encoding.UTF8, cancellationToken)
-            .ConfigureAwait(false);
-        return Parse(content, filePath);
+        try
+        {
+            var content = await File.ReadAllTextAsync(filePath, Encoding.UTF8, cancellationToken)
+                .ConfigureAwait(false);
+            return Parse(content, filePath);
+        }
+        catch (DecoderFallbackException)
+        {
+            // Fall back to Latin1 for unusual encodings rather than failing hard
+            var bytes = await File.ReadAllBytesAsync(filePath, cancellationToken).ConfigureAwait(false);
+            var content = Encoding.Latin1.GetString(bytes);
+            _log?.LogWarning($"Config file used non-UTF8 encoding; loaded with fallback: {filePath}");
+            return Parse(content, filePath);
+        }
+        catch (IOException ex)
+        {
+            _log?.LogError($"Failed to read config '{filePath}'.", ex);
+            // Graceful: return empty document tagged with path rather than throw for normal UI flows
+            return new Cs2ConfigDocument { FilePath = filePath };
+        }
     }
 
     public Cs2ConfigDocument Parse(string content, string? filePath = null)
@@ -75,6 +94,7 @@ public sealed class Cs2ConfigService : ICs2ConfigService
             var match = KeyValueRegex.Match(line);
             if (!match.Success)
             {
+                // Preserve unknown / corrupted lines verbatim — never drop them.
                 document.Entries.Add(new Cs2ConfigEntry
                 {
                     IsCommentOnly = true,
@@ -124,7 +144,7 @@ public sealed class Cs2ConfigService : ICs2ConfigService
                 continue;
             }
 
-            var value = NeedsQuotes(entry.Value) ? $"\"{entry.Value}\"" : entry.Value;
+            var value = NeedsQuotes(entry.Value) ? $"\"{EscapeQuotes(entry.Value)}\"" : entry.Value;
             if (!string.IsNullOrEmpty(entry.Comment))
             {
                 sb.Append(entry.Key).Append(' ').Append(value).Append(" // ").AppendLine(entry.Comment);
@@ -149,28 +169,22 @@ public sealed class Cs2ConfigService : ICs2ConfigService
             Directory.CreateDirectory(directory);
         }
 
-        // Side-car backup next to the file before overwrite
+        // Side-car backup next to the file before overwrite — never overwrite without backup.
         if (File.Exists(document.FilePath))
         {
-            var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+            var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
             var backupPath = $"{document.FilePath}.frameforge.bak.{stamp}";
-            File.Copy(document.FilePath, backupPath, overwrite: false);
+            AtomicFile.Copy(document.FilePath, backupPath, overwrite: false);
             _log?.LogInformation($"Created config side-car backup: {backupPath}");
         }
 
         var content = Serialize(document);
-        var tempPath = document.FilePath + ".tmp";
-        await File.WriteAllTextAsync(tempPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken)
+        await AtomicFile.WriteAllTextAsync(
+                document.FilePath,
+                content,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                cancellationToken)
             .ConfigureAwait(false);
-
-        if (File.Exists(document.FilePath))
-        {
-            File.Replace(tempPath, document.FilePath, destinationBackupFileName: null);
-        }
-        else
-        {
-            File.Move(tempPath, document.FilePath);
-        }
 
         _log?.LogInformation($"Wrote CS2 config: {document.FilePath}");
     }
@@ -228,6 +242,9 @@ public sealed class Cs2ConfigService : ICs2ConfigService
 
         return value;
     }
+
+    private static string EscapeQuotes(string value) =>
+        value.Replace("\"", "\\\"", StringComparison.Ordinal);
 
     private static bool NeedsQuotes(string value) =>
         string.IsNullOrEmpty(value) ||

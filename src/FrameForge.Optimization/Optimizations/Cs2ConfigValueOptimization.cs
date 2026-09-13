@@ -130,16 +130,20 @@ public sealed class Cs2ConfigValueOptimization : OptimizationBase
                 return OptimizationResult.Fail(Id, "No previous values stored for revert. Restore from a backup instead.");
             }
 
-            var toRestore = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var document = await _configService.ReadAsync(_lastTargetPath, cancellationToken).ConfigureAwait(false);
-            var map = document.ToDictionary();
+            // Prefer restoring from the newest side-car backup created by Cs2ConfigService.
+            var restoredFromSidecar = TryRestoreNewestSidecar(_lastTargetPath);
+            if (restoredFromSidecar)
+            {
+                return OptimizationResult.Ok(Id, "Reverted from side-car backup.", files: new[] { _lastTargetPath });
+            }
 
+            var toRestore = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (key, previous) in _lastPreviousValues)
             {
                 if (previous is null)
                 {
-                    // Key did not exist before — remove if present
-                    // Soft approach: set empty marker comment by skipping write; leave as-is for safety.
+                    // Key did not exist before. We do not delete user keys silently.
+                    // Leave newly introduced keys in place; full file restore covers true rollback.
                     continue;
                 }
 
@@ -157,6 +161,37 @@ public sealed class Cs2ConfigValueOptimization : OptimizationBase
         catch (Exception ex)
         {
             return OptimizationResult.Fail(Id, ex.Message, ex);
+        }
+    }
+
+    private static bool TryRestoreNewestSidecar(string targetPath)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(targetPath);
+            var fileName = Path.GetFileName(targetPath);
+            if (string.IsNullOrEmpty(directory) || string.IsNullOrEmpty(fileName))
+            {
+                return false;
+            }
+
+            var pattern = fileName + ".frameforge.bak.*";
+            var sidecars = Directory.Exists(directory)
+                ? Directory.GetFiles(directory, pattern)
+                : Array.Empty<string>();
+
+            if (sidecars.Length == 0)
+            {
+                return false;
+            }
+
+            var newest = sidecars.OrderByDescending(f => f, StringComparer.Ordinal).First();
+            File.Copy(newest, targetPath, overwrite: true);
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 }

@@ -6,14 +6,179 @@ namespace FrameForge.CS2;
 /// </summary>
 public static class SteamLibraryLocator
 {
-    public static IReadOnlyList<string> FindSteamRoots(string? customSteamPath = null)
+    public sealed class DiscoveryResult
     {
+        public IReadOnlyList<string> SteamRoots { get; init; } = Array.Empty<string>();
+        public IReadOnlyList<string> Libraries { get; init; } = Array.Empty<string>();
+        public IReadOnlyList<string> InaccessiblePaths { get; init; } = Array.Empty<string>();
+        public IReadOnlyList<string> CandidateRootsConsidered { get; init; } = Array.Empty<string>();
+    }
+
+    public static DiscoveryResult Discover(string? customSteamPath = null)
+    {
+        var inaccessible = new List<string>();
+        var candidateRoots = EnumerateSteamRootCandidates(customSteamPath).ToList();
         var roots = new List<string>();
+
+        foreach (var candidate in candidateRoots)
+        {
+            try
+            {
+                if (IsSteamRoot(candidate))
+                {
+                    roots.Add(Path.GetFullPath(candidate));
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                inaccessible.Add(candidate);
+            }
+            catch (IOException)
+            {
+                inaccessible.Add(candidate);
+            }
+        }
+
+        var libraries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in roots)
+        {
+            libraries.Add(root);
+
+            foreach (var vdf in EnumerateLibraryFolderVdfPaths(root))
+            {
+                try
+                {
+                    if (!File.Exists(vdf))
+                    {
+                        continue;
+                    }
+
+                    string content;
+                    try
+                    {
+                        content = File.ReadAllText(vdf);
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        inaccessible.Add(vdf);
+                        continue;
+                    }
+                    catch (IOException)
+                    {
+                        inaccessible.Add(vdf);
+                        continue;
+                    }
+
+                    foreach (var path in ParseLibraryFoldersVdf(content))
+                    {
+                        try
+                        {
+                            if (Directory.Exists(path))
+                            {
+                                libraries.Add(Path.GetFullPath(path));
+                            }
+                            else if (!string.IsNullOrWhiteSpace(path))
+                            {
+                                // Path declared but missing is normal (unplugged drive) — record as inaccessible-ish
+                                inaccessible.Add(path);
+                            }
+                        }
+                        catch (UnauthorizedAccessException)
+                        {
+                            inaccessible.Add(path);
+                        }
+                        catch (IOException)
+                        {
+                            inaccessible.Add(path);
+                        }
+                    }
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    inaccessible.Add(vdf);
+                }
+                catch (IOException)
+                {
+                    inaccessible.Add(vdf);
+                }
+            }
+        }
+
+        return new DiscoveryResult
+        {
+            SteamRoots = roots,
+            Libraries = libraries.ToList(),
+            InaccessiblePaths = inaccessible
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            CandidateRootsConsidered = candidateRoots
+        };
+    }
+
+    public static IReadOnlyList<string> FindSteamRoots(string? customSteamPath = null) =>
+        Discover(customSteamPath).SteamRoots;
+
+    public static IReadOnlyList<string> FindLibraryFolders(IEnumerable<string> steamRoots)
+    {
+        // Preserve call-site API; re-run discovery only for the provided roots.
+        var libraries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in steamRoots)
+        {
+            libraries.Add(root);
+            foreach (var vdf in EnumerateLibraryFolderVdfPaths(root))
+            {
+                if (!SafeFileExists(vdf))
+                {
+                    continue;
+                }
+
+                string? content = null;
+                try
+                {
+                    content = File.ReadAllText(vdf);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                foreach (var path in ParseLibraryFoldersVdf(content))
+                {
+                    if (SafeDirectoryExists(path))
+                    {
+                        try
+                        {
+                            libraries.Add(Path.GetFullPath(path));
+                        }
+                        catch
+                        {
+                            // ignore bad path
+                        }
+                    }
+                }
+            }
+        }
+
+        return libraries.ToList();
+    }
+
+    public static IEnumerable<string> EnumerateSteamRootCandidates(string? customSteamPath = null)
+    {
         var candidates = new List<string>();
 
         if (!string.IsNullOrWhiteSpace(customSteamPath))
         {
-            candidates.Add(customSteamPath);
+            candidates.Add(Environment.ExpandEnvironmentVariables(customSteamPath.Trim()));
+        }
+
+        // Environment overrides used by some Steam installs / launchers
+        foreach (var envName in new[] { "STEAM_PATH", "STEAMROOT", "SteamPath" })
+        {
+            var env = Environment.GetEnvironmentVariable(envName);
+            if (!string.IsNullOrWhiteSpace(env))
+            {
+                candidates.Add(Environment.ExpandEnvironmentVariables(env.Trim()));
+            }
         }
 
         if (OperatingSystem.IsWindows())
@@ -21,18 +186,43 @@ public static class SteamLibraryLocator
             var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
             var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
             var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-            candidates.Add(Path.Combine(programFilesX86, "Steam"));
-            candidates.Add(Path.Combine(programFiles, "Steam"));
-            candidates.Add(Path.Combine(localAppData, "Programs", "Steam"));
+            if (!string.IsNullOrWhiteSpace(programFilesX86))
+            {
+                candidates.Add(Path.Combine(programFilesX86, "Steam"));
+            }
 
-            // Common alternate drive letters without assuming a single root
+            if (!string.IsNullOrWhiteSpace(programFiles))
+            {
+                candidates.Add(Path.Combine(programFiles, "Steam"));
+            }
+
+            if (!string.IsNullOrWhiteSpace(localAppData))
+            {
+                candidates.Add(Path.Combine(localAppData, "Programs", "Steam"));
+                candidates.Add(Path.Combine(localAppData, "Steam"));
+            }
+
+            if (!string.IsNullOrWhiteSpace(userProfile))
+            {
+                candidates.Add(Path.Combine(userProfile, "Steam"));
+            }
+
+            // Registry-based path (Windows only) — legitimate HKCU/HKLM read, no elevation.
+            foreach (var regPath in TryReadWindowsSteamPathsFromRegistry())
+            {
+                candidates.Add(regPath);
+            }
+
+            // Probe fixed/removable drives for alternate libraries without assuming a single root.
             foreach (var drive in GetWindowsDriveRoots())
             {
                 candidates.Add(Path.Combine(drive, "Steam"));
                 candidates.Add(Path.Combine(drive, "Program Files (x86)", "Steam"));
                 candidates.Add(Path.Combine(drive, "Program Files", "Steam"));
                 candidates.Add(Path.Combine(drive, "Games", "Steam"));
+                candidates.Add(Path.Combine(drive, "SteamLibrary"));
             }
         }
         else if (OperatingSystem.IsLinux())
@@ -42,6 +232,7 @@ public static class SteamLibraryLocator
             candidates.Add(Path.Combine(home, ".steam", "root"));
             candidates.Add(Path.Combine(home, ".local", "share", "Steam"));
             candidates.Add(Path.Combine(home, ".var", "app", "com.valvesoftware.Steam", "data", "Steam"));
+            candidates.Add(Path.Combine(home, "Steam"));
         }
         else if (OperatingSystem.IsMacOS())
         {
@@ -49,55 +240,15 @@ public static class SteamLibraryLocator
             candidates.Add(Path.Combine(home, "Library", "Application Support", "Steam"));
         }
 
-        foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            if (IsSteamRoot(candidate))
-            {
-                roots.Add(Path.GetFullPath(candidate));
-            }
-        }
-
-        return roots;
-    }
-
-    public static IReadOnlyList<string> FindLibraryFolders(IEnumerable<string> steamRoots)
-    {
-        var libraries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var root in steamRoots)
-        {
-            libraries.Add(root);
-
-            var vdfPaths = new[]
-            {
-                Path.Combine(root, "steamapps", "libraryfolders.vdf"),
-                Path.Combine(root, "config", "libraryfolders.vdf"),
-                Path.Combine(root, "steamapps", "libraryfolders.vdf".ToLowerInvariant())
-            };
-
-            foreach (var vdf in vdfPaths.Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                if (!File.Exists(vdf))
-                {
-                    continue;
-                }
-
-                foreach (var path in ParseLibraryFoldersVdf(File.ReadAllText(vdf)))
-                {
-                    if (Directory.Exists(path))
-                    {
-                        libraries.Add(Path.GetFullPath(path));
-                    }
-                }
-            }
-        }
-
-        return libraries.ToList();
+        return candidates
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
     /// Minimal VDF parser focused on library folder "path" entries.
     /// Supports both legacy and modern libraryfolders.vdf formats.
+    /// Corrupted / partial content is tolerated — returns whatever paths can be parsed.
     /// </summary>
     public static IReadOnlyList<string> ParseLibraryFoldersVdf(string content)
     {
@@ -107,8 +258,6 @@ public static class SteamLibraryLocator
             return results;
         }
 
-        // Match: "path"   "D:\\SteamLibrary"
-        // Also tolerate escaped separators and forward slashes.
         var lines = content.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
         foreach (var rawLine in lines)
         {
@@ -137,8 +286,12 @@ public static class SteamLibraryLocator
             }
             else if (IsLegacyIndexedPathLine(line) && values.Count >= 2)
             {
-                // Legacy: "1"		"D:\\SteamLibrary"
-                pathValue = values[1];
+                // Only treat as a path if the second token looks like a filesystem path
+                var candidate = values[1];
+                if (LooksLikePath(candidate))
+                {
+                    pathValue = candidate;
+                }
             }
 
             if (string.IsNullOrWhiteSpace(pathValue))
@@ -146,11 +299,7 @@ public static class SteamLibraryLocator
                 continue;
             }
 
-            var normalized = pathValue
-                .Replace("\\\\", "\\")
-                .Replace('/', Path.DirectorySeparatorChar)
-                .Trim();
-
+            var normalized = NormalizeVdfPath(pathValue);
             if (normalized.Length > 0)
             {
                 results.Add(normalized);
@@ -162,9 +311,59 @@ public static class SteamLibraryLocator
             .ToList();
     }
 
+    public static string NormalizeVdfPath(string pathValue)
+    {
+        if (string.IsNullOrWhiteSpace(pathValue))
+        {
+            return string.Empty;
+        }
+
+        var normalized = pathValue.Trim();
+
+        // Unescape common VDF sequences
+        normalized = normalized
+            .Replace("\\\\", "\\", StringComparison.Ordinal)
+            .Replace("\\/", "/", StringComparison.Ordinal);
+
+        if (Path.DirectorySeparatorChar == '/')
+        {
+            normalized = normalized.Replace('\\', '/');
+        }
+        else
+        {
+            normalized = normalized.Replace('/', '\\');
+        }
+
+        return normalized.Trim();
+    }
+
+    private static bool LooksLikePath(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        // Windows drive, UNC, or Unix absolute / home-relative
+        if (value.Length >= 2 && char.IsLetter(value[0]) && value[1] == ':')
+        {
+            return true;
+        }
+
+        if (value.StartsWith("\\\\", StringComparison.Ordinal) ||
+            value.StartsWith("/", StringComparison.Ordinal) ||
+            value.StartsWith("~", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // Relative folder name used as library root
+        return value.Contains('\\') || value.Contains('/') ||
+               value.Contains("Steam", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsLegacyIndexedPathLine(string line)
     {
-        // "1"  "C:\path"  — first token is numeric index
         var values = ExtractQuotedValues(line);
         return values.Count >= 2 && int.TryParse(values[0], out _);
     }
@@ -202,7 +401,7 @@ public static class SteamLibraryLocator
             if (i <= line.Length)
             {
                 var segment = line[start..Math.Min(i, line.Length)];
-                values.Add(segment.Replace("\\\"", "\""));
+                values.Add(segment.Replace("\\\"", "\"", StringComparison.Ordinal));
             }
 
             i++;
@@ -211,25 +410,37 @@ public static class SteamLibraryLocator
         return values;
     }
 
+    private static IEnumerable<string> EnumerateLibraryFolderVdfPaths(string root)
+    {
+        yield return Path.Combine(root, "steamapps", "libraryfolders.vdf");
+        yield return Path.Combine(root, "config", "libraryfolders.vdf");
+        yield return Path.Combine(root, "steamapps", "libraryfolders.vdf");
+    }
+
     private static bool IsSteamRoot(string path)
     {
-        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        if (string.IsNullOrWhiteSpace(path) || !SafeDirectoryExists(path))
         {
             return false;
         }
 
-        // A Steam root typically contains steamapps or steam.exe / steam.sh
-        if (Directory.Exists(Path.Combine(path, "steamapps")))
+        if (SafeDirectoryExists(Path.Combine(path, "steamapps")))
         {
             return true;
         }
 
-        if (File.Exists(Path.Combine(path, "steam.exe")))
+        if (SafeFileExists(Path.Combine(path, "steam.exe")))
         {
             return true;
         }
 
-        if (File.Exists(Path.Combine(path, "steam.sh")))
+        if (SafeFileExists(Path.Combine(path, "steam.sh")))
+        {
+            return true;
+        }
+
+        // Some installs put steamapps one level deeper
+        if (SafeDirectoryExists(Path.Combine(path, "steam", "steamapps")))
         {
             return true;
         }
@@ -237,19 +448,125 @@ public static class SteamLibraryLocator
         return false;
     }
 
-    private static IEnumerable<string> GetWindowsDriveRoots()
+    private static IReadOnlyList<string> TryReadWindowsSteamPathsFromRegistry()
     {
+        var results = new List<string>();
         if (!OperatingSystem.IsWindows())
         {
-            yield break;
+            return results;
         }
 
-        foreach (var drive in DriveInfo.GetDrives())
+        // Avoid a hard dependency on Microsoft.Win32.Registry package: resolve via reflection
+        // when the assembly is present on Windows runtimes.
+        Type? registryType;
+        try
         {
-            if (drive.IsReady && drive.DriveType is DriveType.Fixed or DriveType.Removable)
+            registryType = Type.GetType("Microsoft.Win32.Registry, Microsoft.Win32.Registry")
+                           ?? Type.GetType("Microsoft.Win32.Registry, System.Windows.Extensions")
+                           ?? Type.GetType("Microsoft.Win32.Registry");
+        }
+        catch
+        {
+            return results;
+        }
+
+        if (registryType is null)
+        {
+            return results;
+        }
+
+        var getValue = registryType.GetMethod(
+            "GetValue",
+            new[] { typeof(string), typeof(string), typeof(object) });
+        if (getValue is null)
+        {
+            return results;
+        }
+
+        string[] keys =
+        [
+            @"HKEY_CURRENT_USER\Software\Valve\Steam",
+            @"HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam",
+            @"HKEY_LOCAL_MACHINE\SOFTWARE\Valve\Steam"
+        ];
+
+        foreach (var key in keys)
+        {
+            try
             {
-                yield return drive.RootDirectory.FullName;
+                var value = getValue.Invoke(null, new object?[] { key, "SteamPath", null }) as string
+                            ?? getValue.Invoke(null, new object?[] { key, "InstallPath", null }) as string;
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    results.Add(value.Replace('/', Path.DirectorySeparatorChar));
+                }
             }
+            catch
+            {
+                // Registry may be restricted or unavailable; ignore
+            }
+        }
+
+        return results;
+    }
+
+    private static IReadOnlyList<string> GetWindowsDriveRoots()
+    {
+        var results = new List<string>();
+        if (!OperatingSystem.IsWindows())
+        {
+            return results;
+        }
+
+        DriveInfo[] drives;
+        try
+        {
+            drives = DriveInfo.GetDrives();
+        }
+        catch
+        {
+            return results;
+        }
+
+        foreach (var drive in drives)
+        {
+            try
+            {
+                if (drive.IsReady && drive.DriveType is DriveType.Fixed or DriveType.Removable)
+                {
+                    results.Add(drive.RootDirectory.FullName);
+                }
+            }
+            catch
+            {
+                // skip inaccessible drives
+            }
+        }
+
+        return results;
+    }
+
+    private static bool SafeDirectoryExists(string path)
+    {
+        try
+        {
+            return Directory.Exists(path);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool SafeFileExists(string path)
+    {
+        try
+        {
+            return File.Exists(path);
+        }
+        catch
+        {
+            return false;
         }
     }
 }

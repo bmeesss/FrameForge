@@ -1,4 +1,5 @@
 using FrameForge.Core.Abstractions;
+using FrameForge.Core.IO;
 using FrameForge.Core.Json;
 using FrameForge.Core.Models;
 
@@ -6,6 +7,7 @@ namespace FrameForge.Infrastructure.Backup;
 
 /// <summary>
 /// File-based backup store under Backups/ with metadata.json.
+/// Each entry stores file snapshots + previous values sufficient for restore.
 /// </summary>
 public sealed class BackupService : IBackupService
 {
@@ -37,20 +39,42 @@ public sealed class BackupService : IBackupService
 
             var snapshots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var affected = new List<string>();
+            var copyFailures = new List<string>();
 
             foreach (var file in affectedFiles.Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (string.IsNullOrWhiteSpace(file) || !File.Exists(file))
+                if (string.IsNullOrWhiteSpace(file))
                 {
                     continue;
                 }
 
-                var safeName = MakeSafeFileName(file);
-                var dest = Path.Combine(entryDir, safeName);
-                File.Copy(file, dest, overwrite: true);
-                snapshots[file] = safeName;
-                affected.Add(file);
+                if (!File.Exists(file))
+                {
+                    // Missing source is not fatal — record absence so restore knows the file was new.
+                    continue;
+                }
+
+                try
+                {
+                    var safeName = MakeSafeFileName(file);
+                    var dest = Path.Combine(entryDir, safeName);
+                    AtomicFile.Copy(file, dest, overwrite: true);
+                    snapshots[file] = safeName;
+                    affected.Add(file);
+                }
+                catch (Exception ex)
+                {
+                    copyFailures.Add(file);
+                    _log.LogWarning($"Failed to snapshot '{file}': {ex.Message}");
+                }
+            }
+
+            if (copyFailures.Count > 0 && snapshots.Count == 0 && previousValues.Count == 0)
+            {
+                TryDeleteDirectory(entryDir);
+                throw new IOException(
+                    $"Backup failed: could not snapshot any of the requested files ({copyFailures.Count} failure(s)).");
             }
 
             var entry = new BackupEntry
@@ -66,8 +90,20 @@ public sealed class BackupService : IBackupService
             };
 
             var store = await LoadStoreAsync(cancellationToken).ConfigureAwait(false);
+
+            // Prevent duplicate IDs (extremely unlikely, but guard anyway)
+            store.Backups.RemoveAll(b => b.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
             store.Backups.Insert(0, entry);
-            await SaveStoreAsync(store, cancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                await SaveStoreAsync(store, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                TryDeleteDirectory(entryDir);
+                throw;
+            }
 
             _log.LogInformation($"Created backup {id} with {affected.Count} file(s).");
             return entry;
@@ -88,19 +124,40 @@ public sealed class BackupService : IBackupService
 
     public async Task<BackupEntry?> GetBackupAsync(string backupId, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(backupId))
+        {
+            return null;
+        }
+
         var store = await LoadStoreAsync(cancellationToken).ConfigureAwait(false);
         return store.Backups.FirstOrDefault(b => b.Id.Equals(backupId, StringComparison.OrdinalIgnoreCase));
     }
 
-    public async Task RestoreAsync(string backupId, CancellationToken cancellationToken = default)
+    public async Task<BackupRestoreResult> RestoreAsync(string backupId, CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var entry = await GetBackupAsync(backupId, cancellationToken).ConfigureAwait(false)
-                ?? throw new InvalidOperationException($"Backup '{backupId}' was not found.");
+            if (string.IsNullOrWhiteSpace(backupId))
+            {
+                return BackupRestoreResult.Fail(backupId ?? string.Empty, "Backup id is required.");
+            }
+
+            var entry = await GetBackupAsync(backupId, cancellationToken).ConfigureAwait(false);
+            if (entry is null)
+            {
+                return BackupRestoreResult.Fail(backupId, $"Backup '{backupId}' was not found.");
+            }
 
             var entryDir = Path.Combine(_paths.BackupsDirectory, entry.Id);
+            if (!Directory.Exists(entryDir) && entry.FileSnapshots.Count > 0)
+            {
+                return BackupRestoreResult.Fail(backupId, $"Backup directory missing for '{backupId}'.");
+            }
+
+            var restored = new List<string>();
+            var failed = new List<string>();
+
             foreach (var (originalPath, snapshotName) in entry.FileSnapshots)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -108,28 +165,45 @@ public sealed class BackupService : IBackupService
                 if (!File.Exists(source))
                 {
                     _log.LogWarning($"Snapshot missing for restore: {snapshotName}");
+                    failed.Add(originalPath);
                     continue;
                 }
 
-                var directory = Path.GetDirectoryName(originalPath);
-                if (!string.IsNullOrEmpty(directory))
+                try
                 {
-                    Directory.CreateDirectory(directory);
-                }
+                    var directory = Path.GetDirectoryName(originalPath);
+                    if (!string.IsNullOrEmpty(directory))
+                    {
+                        Directory.CreateDirectory(directory);
+                    }
 
-                var temp = originalPath + ".restore.tmp";
-                File.Copy(source, temp, overwrite: true);
-                if (File.Exists(originalPath))
-                {
-                    File.Replace(temp, originalPath, destinationBackupFileName: null);
+                    AtomicFile.Copy(source, originalPath, overwrite: true);
+                    restored.Add(originalPath);
                 }
-                else
+                catch (Exception ex)
                 {
-                    File.Move(temp, originalPath);
+                    _log.LogError($"Failed to restore '{originalPath}'.", ex);
+                    failed.Add(originalPath);
                 }
             }
 
+            if (failed.Count > 0 && restored.Count == 0)
+            {
+                return BackupRestoreResult.Fail(backupId, "Restore failed for all files.", restored, failed);
+            }
+
+            if (failed.Count > 0)
+            {
+                _log.LogWarning($"Partial restore for {backupId}: {restored.Count} ok, {failed.Count} failed.");
+                return BackupRestoreResult.Fail(
+                    backupId,
+                    $"Partial restore: {restored.Count} restored, {failed.Count} failed.",
+                    restored,
+                    failed);
+            }
+
             _log.LogInformation($"Restored backup {backupId}.");
+            return BackupRestoreResult.Ok(backupId, restored);
         }
         finally
         {
@@ -152,10 +226,7 @@ public sealed class BackupService : IBackupService
             await SaveStoreAsync(store, cancellationToken).ConfigureAwait(false);
 
             var dir = Path.Combine(_paths.BackupsDirectory, backupId);
-            if (Directory.Exists(dir))
-            {
-                Directory.Delete(dir, recursive: true);
-            }
+            TryDeleteDirectory(dir);
 
             _log.LogInformation($"Deleted backup {backupId}.");
         }
@@ -179,7 +250,18 @@ public sealed class BackupService : IBackupService
         }
         catch (Exception ex)
         {
-            _log.LogError("Failed to read backup metadata; starting empty store.", ex);
+            // Corrupted metadata: quarantine and start fresh rather than crashing.
+            _log.LogError("Failed to read backup metadata; quarantining corrupt file.", ex);
+            try
+            {
+                var quarantine = _paths.BackupMetadataPath + $".corrupt.{DateTime.UtcNow:yyyyMMddHHmmss}";
+                File.Move(_paths.BackupMetadataPath, quarantine);
+            }
+            catch
+            {
+                // ignore quarantine failure
+            }
+
             return new BackupMetadataStore();
         }
     }
@@ -200,9 +282,23 @@ public sealed class BackupService : IBackupService
             name = name.Replace(c, '_');
         }
 
-        // Avoid collisions for same file names from different folders
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(path)))[..8];
         return $"{hash}_{name}";
+    }
+
+    private static void TryDeleteDirectory(string dir)
+    {
+        try
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+        catch
+        {
+            // best effort
+        }
     }
 }

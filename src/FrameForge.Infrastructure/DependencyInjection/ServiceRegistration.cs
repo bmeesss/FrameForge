@@ -30,6 +30,7 @@ public static class ServiceRegistration
         services.AddSingleton<IProfileService, ProfileService>();
         services.AddSingleton<IOptimizationCatalog, OptimizationCatalog>();
         services.AddSingleton<IOptimizationPipeline, OptimizationPipeline>();
+        services.AddSingleton<IOptimizationScoreService, OptimizationScoreService>();
         services.AddSingleton<IDashboardService, DashboardService>();
         services.AddSingleton<BasicSystemBenchmark>();
         return services;
