@@ -146,4 +146,54 @@ public interface IPathService
     string SettingsFilePath { get; }
     string ProfilesDirectory { get; }
     string BackupMetadataPath { get; }
+    string BenchmarksDirectory { get; }
+}
+
+/// <summary>
+/// External CS2 process observation only (no memory read, no injection).
+/// </summary>
+public interface ICs2ProcessMonitor
+{
+    Cs2ProcessInfo? TryGetCs2Process();
+}
+
+/// <summary>
+/// OS-level performance sampling. Never reads CS2 memory or hooks graphics APIs.
+/// </summary>
+public interface IPerformanceSampler
+{
+    void Reset();
+    BenchmarkSample TakeSample(Cs2ProcessInfo? cs2, bool isWarmup, double elapsedMs);
+}
+
+/// <summary>Persists benchmark runs as local JSON only (no network).</summary>
+public interface IBenchmarkStore
+{
+    Task<string> SaveAsync(BenchmarkRun run, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<BenchmarkRun>> ListAsync(CancellationToken cancellationToken = default);
+    Task<BenchmarkRun?> GetAsync(string runId, CancellationToken cancellationToken = default);
+    Task DeleteAsync(string runId, CancellationToken cancellationToken = default);
+    Task ExportJsonAsync(string runId, string destinationPath, CancellationToken cancellationToken = default);
+    Task ExportCsvAsync(string runId, string destinationPath, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Controlled external benchmark session engine.</summary>
+public interface IBenchmarkEngine
+{
+    BenchmarkStatus Status { get; }
+    BenchmarkRun? CurrentRun { get; }
+    event EventHandler? StatusChanged;
+    event EventHandler<BenchmarkSample>? SampleCaptured;
+
+    Task<BenchmarkRun> StartAsync(BenchmarkConfiguration configuration, CancellationToken cancellationToken = default);
+    void RequestStop();
+    void RequestCancel();
+    BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after);
+}
+
+/// <summary>Pure calculation helpers exposed for tests and the engine.</summary>
+public interface IBenchmarkCalculator
+{
+    BenchmarkResult Calculate(IReadOnlyList<BenchmarkSample> samples);
+    BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after);
 }

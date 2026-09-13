@@ -51,6 +51,13 @@ public static class Assert
     public static void Equal<T>(T expected, T actual) =>
         True(Equals(expected, actual), $"Expected: {expected}{Environment.NewLine}Actual:   {actual}");
 
+    public static void Equal(double expected, double actual, int precision)
+    {
+        var tol = Math.Pow(10, -precision);
+        True(Math.Abs(expected - actual) <= tol + double.Epsilon,
+            $"Expected: {expected} (±{tol}){Environment.NewLine}Actual:   {actual}");
+    }
+
     public static void NotEqual<T>(T expected, T actual) =>
         True(!Equals(expected, actual), $"Expected values to differ: {expected}");
 

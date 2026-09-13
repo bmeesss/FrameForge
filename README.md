@@ -20,8 +20,9 @@ It analyzes your PC and CS2 installation, recommends **safe** optimizations, man
 - **CS2 Settings** — strongly typed, category-grouped catalog of **documented cfg-backed** keys only. Flow: Read → Validate → **Diff preview (with real file paths)** → Confirm → Backup → Apply → Verify → auto-rollback on failure.
 - **Profiles** — schema v1 Competitive / Balanced / Quality + custom CRUD/import/export. Apply uses the same real-cfg path as Settings.
 - **Backups** — file snapshots + metadata; restore returns exact previous bytes; files created by an apply are deleted on restore.
+- **Benchmark engine** — external OS-level session to compare system states (before/after). CPU, process CPU/memory, system memory; GPU util/temps and CS2 frame-time marked unavailable without injection. Local JSON history, A/B comparison, JSON/CSV export. **Does not guarantee FPS improvements.**
 - **Logging** — structured local logs; secrets redacted.
-- **UI** — dark WPF shell with loading/empty/error states and confirmation dialogs. Execution status warning when the managed cfg is not wired into autoexec.
+- **UI** — dark WPF shell with loading/empty/error states and confirmation dialogs. Execution status warning when the managed cfg is not wired into autoexec. Benchmark page with live sample timeline.
 
 ## How FrameForge modifies CS2 configuration
 
@@ -132,14 +133,67 @@ Only keys FrameForge will read/write. Unverified or binary-only options are excl
 - Import is **data only** — never executed  
 - Built-in ids are never overwritten on import  
 
+## Benchmark engine (external only)
+
+### Purpose
+
+Compare **two system states** objectively (e.g. before vs after a profile apply).  
+FrameForge **does not guarantee FPS improvements** and will not advertise fake boosts.
+
+### What is measured
+
+| Metric | Source | Notes |
+|--------|--------|--------|
+| System CPU % | Windows `GetSystemTimes` / Linux `/proc/stat` | Delta between samples |
+| CS2 process CPU % | `Process.TotalProcessorTime` | External process info only |
+| CS2 working set | `Process.WorkingSet64` | External process info only |
+| System memory % | Windows `GlobalMemoryStatusEx` / Linux `/proc/meminfo` | |
+| Frame-time / FPS | — | **Unavailable** (no CS2 injection, no DirectX hook) |
+| GPU utilization / temps | — | **Unavailable** in this build (no vendor SDK / DXGI hook) |
+
+FPS is only derived as `1000 / frameTimeMs` when frame-time samples exist. P1 / P0.1 labels are **frame-time percentiles** (99th / 99.9th), not FPS percentiles.
+
+### What is not measured / not done
+
+- No DLL injection, memory reading, kernel drivers, or anti-cheat bypass  
+- No automatic optimization apply as part of the benchmark (measure only)  
+- No network upload of results  
+
+### Session parameters
+
+- Duration: **30 / 60 / 120** seconds  
+- Sample interval: **50–1000 ms** (default 100 ms)  
+- Warm-up: default **10 s** (excluded from aggregates)  
+- States: Idle → Preparing → Running → Stopping → Completed | Failed | Cancelled  
+
+### Storage
+
+Local only:
+
+```text
+%LocalAppData%/FrameForge/Benchmarks/yyyy-MM-dd_HHmmss_<id>.json
+```
+
+Export JSON (full run) or CSV (raw samples) from the Benchmark page. No telemetry.
+
+### Monitoring overhead
+
+Default 100 ms interval; each sample is a few OS counter / process property reads. Avoid intervals below 50 ms so the monitor itself does not skew results.
+
+### Before / after comparison
+
+Select two history runs (A and B). The UI shows metric, before, after, absolute difference, and percent difference for **available** metrics only. Unavailable metrics stay labeled unavailable.
+
 ## Not implemented yet (honest)
 
 - Automatic Windows power-plan / registry tweaks (advisory only)
 - Windows Game Mode status probe (score factor present, 0 points)
 - Windows GPU name via DXGI/WMI
 - Launch-at-startup registration
-- Full CS2 frame-time benchmark / FPS claims
+- CS2 render frame-time without injection (not possible under our safety rules)
+- GPU utilization via documented counters without vendor lock-in
 - **Automatic** Steam launch-option editing (manual recommendation only)
+- Automatic “benchmark → apply → re-benchmark → restore” workflow (Phase 5 candidate)
 - Binary / `video.txt` graphics quality sliders
 
 ## Tech stack
@@ -159,7 +213,7 @@ src/
   FrameForge.Hardware         Hardware probes
   FrameForge.CS2              Steam / CS2 detect + cfg + settings + autoexec integration
   FrameForge.Optimization     Catalog, pipeline, score
-  FrameForge.Benchmark        Lightweight samples
+  FrameForge.Benchmark        External benchmark engine + OS sampler
   FrameForge.Infrastructure   DI, backup, profiles, logs
 tests/
   FrameForge.Tests

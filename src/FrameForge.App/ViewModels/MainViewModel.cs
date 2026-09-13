@@ -21,6 +21,8 @@ public sealed class MainViewModel : ViewModelBase
     private readonly ICs2ConfigService _configService;
     private readonly ICs2SettingsService _cs2SettingsService;
     private readonly ICs2SettingCatalog _settingCatalog;
+    private readonly IBenchmarkEngine _benchmarkEngine;
+    private readonly IBenchmarkStore _benchmarkStore;
     private readonly IAppLog _log;
 
     private string _currentPage = "Home";
@@ -47,6 +49,8 @@ public sealed class MainViewModel : ViewModelBase
         ICs2ConfigService configService,
         ICs2SettingsService cs2SettingsService,
         ICs2SettingCatalog settingCatalog,
+        IBenchmarkEngine benchmarkEngine,
+        IBenchmarkStore benchmarkStore,
         IAppLog log)
     {
         _dashboardService = dashboardService;
@@ -59,7 +63,38 @@ public sealed class MainViewModel : ViewModelBase
         _configService = configService;
         _cs2SettingsService = cs2SettingsService;
         _settingCatalog = settingCatalog;
+        _benchmarkEngine = benchmarkEngine;
+        _benchmarkStore = benchmarkStore;
         _log = log;
+        _benchmarkEngine.StatusChanged += (_, _) =>
+        {
+            RaisePropertyChanged(nameof(BenchmarkStatusText));
+            RaisePropertyChanged(nameof(IsBenchmarkRunning));
+            RaiseCanExecutes();
+        };
+        _benchmarkEngine.SampleCaptured += (_, sample) =>
+        {
+            if (sample.IsWarmup)
+            {
+                return;
+            }
+
+            // Keep chart bounded
+            while (BenchmarkChartPoints.Count > 300)
+            {
+                BenchmarkChartPoints.RemoveAt(0);
+            }
+
+            var y = sample.SystemCpuPercent ?? sample.ProcessCpuPercent ?? 0;
+            BenchmarkChartPoints.Add(new BenchmarkChartPoint
+            {
+                ElapsedMs = sample.ElapsedMs,
+                Value = y,
+                Label = sample.SystemCpuPercent is not null ? "CPU%" : (sample.ProcessCpuPercent is not null ? "ProcCPU%" : "n/a")
+            });
+            RaisePropertyChanged(nameof(HasBenchmarkChart));
+            BenchmarkLiveStatus = $"t={sample.ElapsedMs/1000:0.0}s  CPU={(sample.SystemCpuPercent?.ToString("0.0") ?? "—")}%  CS2={(sample.Cs2ProcessPresent ? "yes" : "no")}";
+        };
 
         NavigateCommand = new RelayCommand(p =>
         {
@@ -105,6 +140,15 @@ public sealed class MainViewModel : ViewModelBase
         DeleteProfileCommand = new AsyncRelayCommand(DeleteSelectedProfileAsync, () => !IsBusy && SelectedProfile is { IsBuiltIn: false });
         CreateProfileCommand = new AsyncRelayCommand(CreateEmptyProfileAsync, () => !IsBusy);
         RenameProfileCommand = new AsyncRelayCommand(RenameSelectedProfileAsync, () => !IsBusy && SelectedProfile is { IsBuiltIn: false });
+
+        StartBenchmarkCommand = new AsyncRelayCommand(StartBenchmarkAsync, () => !IsBenchmarkRunning);
+        StopBenchmarkCommand = new RelayCommand(() => _benchmarkEngine.RequestStop(), () => IsBenchmarkRunning);
+        CancelBenchmarkCommand = new RelayCommand(() => _benchmarkEngine.RequestCancel(), () => IsBenchmarkRunning);
+        RefreshBenchmarkHistoryCommand = new AsyncRelayCommand(LoadBenchmarkHistoryAsync, () => !IsBusy);
+        CompareBenchmarksCommand = new RelayCommand(CompareSelectedBenchmarks, () => SelectedBenchmarkA is not null && SelectedBenchmarkB is not null);
+        ExportBenchmarkJsonCommand = new AsyncRelayCommand(ExportBenchmarkJsonAsync, () => SelectedBenchmarkA is not null);
+        ExportBenchmarkCsvCommand = new AsyncRelayCommand(ExportBenchmarkCsvAsync, () => SelectedBenchmarkA is not null);
+        DeleteBenchmarkCommand = new AsyncRelayCommand(DeleteSelectedBenchmarkAsync, () => SelectedBenchmarkA is not null && !IsBenchmarkRunning);
     }
 
     public ObservableCollection<OptimizationListItem> Optimizations { get; } = new();
@@ -115,6 +159,10 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<Cs2SettingCategory> SettingCategories { get; } = new();
     public ObservableCollection<SettingRowViewModel> SettingRows { get; } = new();
     public ObservableCollection<SettingsDiffEntry> DiffEntries { get; } = new();
+    public ObservableCollection<BenchmarkRun> BenchmarkHistory { get; } = new();
+    public ObservableCollection<BenchmarkChartPoint> BenchmarkChartPoints { get; } = new();
+    public ObservableCollection<BenchmarkComparisonMetric> BenchmarkComparisonRows { get; } = new();
+    public IReadOnlyList<int> BenchmarkDurationOptions { get; } = BenchmarkConfiguration.AllowedDurationsSeconds;
 
     public bool HasSelectedOptimizations => Optimizations.Any(o => o.IsSelected);
     public bool HasOptimizations => Optimizations.Count > 0;
@@ -227,6 +275,7 @@ public sealed class MainViewModel : ViewModelBase
                 RaisePropertyChanged(nameof(IsProfilesPage));
                 RaisePropertyChanged(nameof(IsBackupsPage));
                 RaisePropertyChanged(nameof(IsSettingsPage));
+                RaisePropertyChanged(nameof(IsBenchmarkPage));
             }
         }
     }
@@ -237,6 +286,7 @@ public sealed class MainViewModel : ViewModelBase
     public bool IsProfilesPage => CurrentPage.Equals("Profiles", StringComparison.OrdinalIgnoreCase);
     public bool IsBackupsPage => CurrentPage.Equals("Backups", StringComparison.OrdinalIgnoreCase);
     public bool IsSettingsPage => CurrentPage.Equals("Settings", StringComparison.OrdinalIgnoreCase);
+    public bool IsBenchmarkPage => CurrentPage.Equals("Benchmark", StringComparison.OrdinalIgnoreCase);
 
     public string StatusMessage
     {
@@ -340,6 +390,121 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand DeleteProfileCommand { get; }
     public ICommand CreateProfileCommand { get; }
     public ICommand RenameProfileCommand { get; }
+    public ICommand StartBenchmarkCommand { get; }
+    public ICommand StopBenchmarkCommand { get; }
+    public ICommand CancelBenchmarkCommand { get; }
+    public ICommand RefreshBenchmarkHistoryCommand { get; }
+    public ICommand CompareBenchmarksCommand { get; }
+    public ICommand ExportBenchmarkJsonCommand { get; }
+    public ICommand ExportBenchmarkCsvCommand { get; }
+    public ICommand DeleteBenchmarkCommand { get; }
+
+    public bool IsBenchmarkRunning =>
+        _benchmarkEngine.Status is BenchmarkStatus.Preparing or BenchmarkStatus.Running or BenchmarkStatus.Stopping;
+
+    public string BenchmarkStatusText => _benchmarkEngine.Status.ToString();
+
+    public bool HasBenchmarkHistory => BenchmarkHistory.Count > 0;
+    public bool ShowEmptyBenchmarks => _hasLoaded && !IsBusy && !HasBenchmarkHistory && !IsBenchmarkRunning;
+    public bool HasBenchmarkChart => BenchmarkChartPoints.Count > 0;
+    public bool HasBenchmarkComparison => BenchmarkComparisonRows.Count > 0;
+
+    public int BenchmarkDurationSeconds
+    {
+        get => _benchmarkDurationSeconds;
+        set => SetProperty(ref _benchmarkDurationSeconds, value);
+    }
+    private int _benchmarkDurationSeconds = BenchmarkConfiguration.DefaultDurationSeconds;
+
+    public int BenchmarkSampleIntervalMs
+    {
+        get => _benchmarkSampleIntervalMs;
+        set => SetProperty(ref _benchmarkSampleIntervalMs, value);
+    }
+    private int _benchmarkSampleIntervalMs = BenchmarkConfiguration.DefaultSampleIntervalMs;
+
+    public int BenchmarkWarmupSeconds
+    {
+        get => _benchmarkWarmupSeconds;
+        set => SetProperty(ref _benchmarkWarmupSeconds, value);
+    }
+    private int _benchmarkWarmupSeconds = BenchmarkConfiguration.DefaultWarmupSeconds;
+
+    public string BenchmarkLiveStatus
+    {
+        get => _benchmarkLiveStatus;
+        set => SetProperty(ref _benchmarkLiveStatus, value);
+    }
+    private string _benchmarkLiveStatus = "Idle — external OS counters only (no CS2 injection).";
+
+    public BenchmarkRun? LastCompletedBenchmark
+    {
+        get => _lastCompletedBenchmark;
+        set
+        {
+            if (SetProperty(ref _lastCompletedBenchmark, value))
+            {
+                RaisePropertyChanged(nameof(LastBenchmarkSummary));
+            }
+        }
+    }
+    private BenchmarkRun? _lastCompletedBenchmark;
+
+    public string LastBenchmarkSummary
+    {
+        get
+        {
+            var r = LastCompletedBenchmark?.Result;
+            if (r is null)
+            {
+                return "No completed run in this session.";
+            }
+
+            var cpu = r.SystemCpu.IsAvailable ? $"{r.SystemCpu.Average:0.0}%" : "n/a";
+            var mem = r.SystemMemory.IsAvailable ? $"{r.SystemMemory.Average:0.0}%" : "n/a";
+            var proc = r.ProcessCpu.IsAvailable ? $"{r.ProcessCpu.Average:0.0}%" : "n/a";
+            var ft = r.FrameTimeMs.IsAvailable
+                ? $"avg {r.FrameTimeMs.Average:0.00} ms (P1 {r.FrameTimeMs.P1:0.00})"
+                : "unavailable (no injection)";
+            return $"CPU {cpu} · CS2 CPU {proc} · RAM {mem} · Frame-time {ft} · samples {r.MeasuredSampleCount}";
+        }
+    }
+
+    public BenchmarkRun? SelectedBenchmarkA
+    {
+        get => _selectedBenchmarkA;
+        set
+        {
+            if (SetProperty(ref _selectedBenchmarkA, value))
+            {
+                (CompareBenchmarksCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                (ExportBenchmarkJsonCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+                (ExportBenchmarkCsvCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+                (DeleteBenchmarkCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+            }
+        }
+    }
+    private BenchmarkRun? _selectedBenchmarkA;
+
+    public BenchmarkRun? SelectedBenchmarkB
+    {
+        get => _selectedBenchmarkB;
+        set
+        {
+            if (SetProperty(ref _selectedBenchmarkB, value))
+            {
+                (CompareBenchmarksCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            }
+        }
+    }
+    private BenchmarkRun? _selectedBenchmarkB;
+
+    public string BenchmarkComparisonSummary
+    {
+        get => _benchmarkComparisonSummary;
+        set => SetProperty(ref _benchmarkComparisonSummary, value);
+    }
+    private string _benchmarkComparisonSummary = string.Empty;
 
     public async Task InitializeAsync()
     {
@@ -380,6 +545,14 @@ public sealed class MainViewModel : ViewModelBase
         (DeleteProfileCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (CreateProfileCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (RenameProfileCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (StartBenchmarkCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (StopBenchmarkCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (CancelBenchmarkCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (RefreshBenchmarkHistoryCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (CompareBenchmarksCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (ExportBenchmarkJsonCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (ExportBenchmarkCsvCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (DeleteBenchmarkCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
     }
 
     private async Task RefreshAsync()
@@ -432,6 +605,7 @@ public sealed class MainViewModel : ViewModelBase
 
             await LoadCs2ConfigPreviewAsync().ConfigureAwait(true);
             await LoadCs2SettingsAsync().ConfigureAwait(true);
+            await LoadBenchmarkHistoryAsync().ConfigureAwait(true);
 
             _hasLoaded = true;
             RaisePropertyChanged(nameof(HasOptimizations));
@@ -446,6 +620,8 @@ public sealed class MainViewModel : ViewModelBase
             RaisePropertyChanged(nameof(ScoreSummary));
             RaisePropertyChanged(nameof(HasSelectedOptimizations));
             RaisePropertyChanged(nameof(Cs2SettingsStatus));
+            RaisePropertyChanged(nameof(HasBenchmarkHistory));
+            RaisePropertyChanged(nameof(ShowEmptyBenchmarks));
 
             StatusMessage = $"Updated {DateTime.Now:t}";
         }
@@ -1313,6 +1489,208 @@ public sealed class MainViewModel : ViewModelBase
         }
     }
 
+
+    private async Task LoadBenchmarkHistoryAsync()
+    {
+        try
+        {
+            var list = await _benchmarkStore.ListAsync().ConfigureAwait(true);
+            BenchmarkHistory.Clear();
+            foreach (var run in list)
+            {
+                BenchmarkHistory.Add(run);
+            }
+
+            RaisePropertyChanged(nameof(HasBenchmarkHistory));
+            RaisePropertyChanged(nameof(ShowEmptyBenchmarks));
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning($"Benchmark history load failed: {ex.Message}");
+        }
+    }
+
+    private async Task StartBenchmarkAsync()
+    {
+        var config = new BenchmarkConfiguration
+        {
+            DurationSeconds = BenchmarkDurationSeconds,
+            SampleIntervalMs = BenchmarkSampleIntervalMs,
+            WarmupSeconds = BenchmarkWarmupSeconds,
+            ProfileId = SelectedProfile?.Id ?? Settings.ActiveProfileId,
+            ProfileName = SelectedProfile?.Name
+        };
+
+        var validation = BenchmarkConfiguration.Validate(config);
+        if (!validation.IsValid)
+        {
+            ErrorMessage = string.Join(Environment.NewLine, validation.Issues);
+            StatusMessage = "Invalid benchmark configuration.";
+            return;
+        }
+
+        BenchmarkChartPoints.Clear();
+        RaisePropertyChanged(nameof(HasBenchmarkChart));
+        BenchmarkLiveStatus = "Preparing…";
+        StatusMessage = "Benchmark starting (external OS counters only)…";
+        ErrorMessage = null;
+        RaiseCanExecutes();
+
+        try
+        {
+            var run = await _benchmarkEngine.StartAsync(config).ConfigureAwait(true);
+            LastCompletedBenchmark = run;
+            if (run.Status == BenchmarkStatus.Completed)
+            {
+                StatusMessage = $"Benchmark completed: {run.Id}";
+            }
+            else if (run.Status == BenchmarkStatus.Cancelled)
+            {
+                StatusMessage = "Benchmark cancelled.";
+            }
+            else if (run.Status == BenchmarkStatus.Failed)
+            {
+                ErrorMessage = run.Error ?? "Benchmark failed.";
+                StatusMessage = "Benchmark failed.";
+            }
+            else
+            {
+                StatusMessage = $"Benchmark ended: {run.Status}";
+            }
+
+            await LoadBenchmarkHistoryAsync().ConfigureAwait(true);
+            SelectedBenchmarkA = BenchmarkHistory.FirstOrDefault(b => b.Id == run.Id) ?? run;
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            StatusMessage = "Benchmark failed to start.";
+            _log.LogError("Benchmark start failed.", ex);
+        }
+        finally
+        {
+            RaiseCanExecutes();
+            RaisePropertyChanged(nameof(BenchmarkStatusText));
+            RaisePropertyChanged(nameof(IsBenchmarkRunning));
+        }
+    }
+
+    private void CompareSelectedBenchmarks()
+    {
+        if (SelectedBenchmarkA is null || SelectedBenchmarkB is null)
+        {
+            StatusMessage = "Select two benchmark runs (A and B).";
+            return;
+        }
+
+        var comparison = _benchmarkEngine.Compare(SelectedBenchmarkA, SelectedBenchmarkB);
+        BenchmarkComparisonRows.Clear();
+        foreach (var m in comparison.Metrics)
+        {
+            BenchmarkComparisonRows.Add(m);
+        }
+
+        BenchmarkComparisonSummary = comparison.Summary +
+            " A=" + SelectedBenchmarkA.DisplayTitle + " · B=" + SelectedBenchmarkB.DisplayTitle;
+        RaisePropertyChanged(nameof(HasBenchmarkComparison));
+        StatusMessage = "Comparison ready.";
+    }
+
+    private async Task ExportBenchmarkJsonAsync()
+    {
+        if (SelectedBenchmarkA is null)
+        {
+            return;
+        }
+
+        var dialog = new SaveFileDialog
+        {
+            Filter = "JSON (*.json)|*.json",
+            FileName = SelectedBenchmarkA.Id + ".json",
+            AddExtension = true,
+            DefaultExt = "json"
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            StatusMessage = "Export cancelled.";
+            return;
+        }
+
+        try
+        {
+            await _benchmarkStore.ExportJsonAsync(SelectedBenchmarkA.Id, dialog.FileName).ConfigureAwait(true);
+            StatusMessage = $"Exported JSON to {dialog.FileName}";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            StatusMessage = "Export failed.";
+        }
+    }
+
+    private async Task ExportBenchmarkCsvAsync()
+    {
+        if (SelectedBenchmarkA is null)
+        {
+            return;
+        }
+
+        var dialog = new SaveFileDialog
+        {
+            Filter = "CSV (*.csv)|*.csv",
+            FileName = SelectedBenchmarkA.Id + ".csv",
+            AddExtension = true,
+            DefaultExt = "csv"
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            StatusMessage = "Export cancelled.";
+            return;
+        }
+
+        try
+        {
+            await _benchmarkStore.ExportCsvAsync(SelectedBenchmarkA.Id, dialog.FileName).ConfigureAwait(true);
+            StatusMessage = $"Exported CSV samples to {dialog.FileName}";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            StatusMessage = "CSV export failed.";
+        }
+    }
+
+    private async Task DeleteSelectedBenchmarkAsync()
+    {
+        if (SelectedBenchmarkA is null)
+        {
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            $"Delete local benchmark '{SelectedBenchmarkA.Id}'?",
+            "Confirm delete",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            await _benchmarkStore.DeleteAsync(SelectedBenchmarkA.Id).ConfigureAwait(true);
+            StatusMessage = "Benchmark deleted.";
+            SelectedBenchmarkA = null;
+            await LoadBenchmarkHistoryAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+
     private static string? Prompt(string message, string title, string defaultValue)
     {
         // Simple prompt via WPF input dialog substitute
@@ -1441,4 +1819,12 @@ public sealed class OptimizationListItem : ViewModelBase
     }
 
     public string StatusText => CanApply ? "Available" : (BlockReason ?? "Not applicable");
+}
+
+
+public sealed class BenchmarkChartPoint
+{
+    public double ElapsedMs { get; init; }
+    public double Value { get; init; }
+    public string Label { get; init; } = string.Empty;
 }

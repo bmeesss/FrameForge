@@ -38,7 +38,7 @@ public sealed class BasicSystemBenchmark
             Hardware = hardware,
             Duration = sw.Elapsed,
             RelativeCpuScore = Math.Max(1, (int)(2_000_000.0 / Math.Max(1, sw.Elapsed.TotalMilliseconds))),
-            Notes = "Lightweight foundation sample only. Full CS2 frame-time capture is TODO."
+            Notes = "Lightweight CPU spin sample only. Use IBenchmarkEngine for external OS counter sessions (no CS2 injection / no fake FPS)."
         };
     }
 }

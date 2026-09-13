@@ -36,6 +36,11 @@ public static class ServiceRegistration
         services.AddSingleton<IOptimizationScoreService, OptimizationScoreService>();
         services.AddSingleton<IDashboardService, DashboardService>();
         services.AddSingleton<BasicSystemBenchmark>();
+        services.AddSingleton<IBenchmarkCalculator, BenchmarkCalculator>();
+        services.AddSingleton<ICs2ProcessMonitor, Cs2ProcessMonitor>();
+        services.AddSingleton<IPerformanceSampler, OsPerformanceSampler>();
+        services.AddSingleton<IBenchmarkStore, BenchmarkStore>();
+        services.AddSingleton<IBenchmarkEngine, BenchmarkEngine>();
         return services;
     }
 

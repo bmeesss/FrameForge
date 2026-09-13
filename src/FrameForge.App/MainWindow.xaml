@@ -41,6 +41,7 @@
           <Button Content="CS2 Settings" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Cs2" />
           <Button Content="Profiles" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Profiles" />
           <Button Content="Backups" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Backups" />
+          <Button Content="Benchmark" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Benchmark" />
           <Button Content="Settings" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Settings" />
         </StackPanel>
       </DockPanel>
@@ -447,6 +448,156 @@
                   Command="{Binding RestoreBackupCommand}"
                   Margin="0,12,0,0" />
         </Grid>
+
+        <!-- Benchmark -->
+        <ScrollViewer Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Benchmark}">
+          <StackPanel>
+            <TextBlock Text="Benchmark" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,12"
+                       Text="External OS counters only. FrameForge does not inject into CS2, hook DirectX, or invent FPS. Frame-time stays unavailable unless a future external source provides it. Results are stored locally under Benchmarks/." />
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Session</TextBlock>
+                <TextBlock Margin="0,0,0,4">
+                  <Run Text="Status:" />
+                  <Run Text="{Binding BenchmarkStatusText, Mode=OneWay}" FontWeight="SemiBold" />
+                </TextBlock>
+                <TextBlock Text="{Binding BenchmarkLiveStatus}" TextWrapping="Wrap" Margin="0,0,0,8" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBlock Margin="0,0,0,4">
+                  <Run Text="Active profile:" />
+                  <Run Text="{Binding SelectedProfile.Name, Mode=OneWay, FallbackValue=—}" />
+                </TextBlock>
+                <Grid Margin="0,8,0,0">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Margin="0,0,8,0">
+                    <TextBlock Text="Duration (s)" Margin="0,0,0,4" />
+                    <ComboBox ItemsSource="{Binding BenchmarkDurationOptions}" SelectedItem="{Binding BenchmarkDurationSeconds}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Margin="0,0,8,0">
+                    <TextBlock Text="Sample interval (ms)" Margin="0,0,0,4" />
+                    <TextBox Text="{Binding BenchmarkSampleIntervalMs, UpdateSourceTrigger=PropertyChanged}" Padding="6" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="2">
+                    <TextBlock Text="Warm-up (s)" Margin="0,0,0,4" />
+                    <TextBox Text="{Binding BenchmarkWarmupSeconds, UpdateSourceTrigger=PropertyChanged}" Padding="6" />
+                  </StackPanel>
+                </Grid>
+                <WrapPanel Margin="0,12,0,0">
+                  <Button Content="Start Benchmark" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding StartBenchmarkCommand}" Margin="0,0,8,8" />
+                  <Button Content="Stop" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding StopBenchmarkCommand}" Margin="0,0,8,8" />
+                  <Button Content="Cancel" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CancelBenchmarkCommand}" Margin="0,0,8,8" />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Last result</TextBlock>
+                <TextBlock Text="{Binding LastBenchmarkSummary}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,8,0,0" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap"
+                           Text="P1 / P0.1 are frame-time percentiles (99th / 99.9th) when frame-time exists — not FPS percentiles." />
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12"
+                    Visibility="{Binding HasBenchmarkChart, Converter={StaticResource BoolToVisibilityConverter}}">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Live sample timeline (system/process CPU %)</TextBlock>
+                <ItemsControl ItemsSource="{Binding BenchmarkChartPoints}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <WrapPanel />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Width="6" Height="{Binding Value}" MinHeight="2" MaxHeight="80"
+                              Background="{StaticResource AccentBrush}" Margin="1,0" VerticalAlignment="Bottom"
+                              ToolTip="{Binding Label}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,6,0,0"
+                           Text="Bars are measured samples only (warm-up excluded from chart). Height maps to percent." />
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <DockPanel Margin="0,0,0,8">
+                  <TextBlock Text="History (local JSON)" FontWeight="SemiBold" />
+                  <Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshBenchmarkHistoryCommand}" Style="{StaticResource NavButtonStyle}" Padding="8,4" />
+                </DockPanel>
+                <TextBlock Text="No saved benchmarks yet."
+                           Foreground="{StaticResource TextSecondaryBrush}"
+                           Visibility="{Binding ShowEmptyBenchmarks, Converter={StaticResource BoolToVisibilityConverter}}" />
+                <ListBox ItemsSource="{Binding BenchmarkHistory}"
+                         SelectedItem="{Binding SelectedBenchmarkA}"
+                         Background="Transparent" BorderThickness="0"
+                         Visibility="{Binding ShowEmptyBenchmarks, Converter={StaticResource InverseBoolToVisibilityConverter}}"
+                         MaxHeight="220">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,6" Padding="10">
+                        <StackPanel>
+                          <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" />
+                          <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12">
+                            <Run Text="{Binding Status, Mode=OneWay}" />
+                            <Run Text="· CPU" />
+                            <Run Text="{Binding Result.SystemCpu.Average, Mode=OneWay, StringFormat={}{0:0.0}}" />
+                            <Run Text="% · samples" />
+                            <Run Text="{Binding Result.MeasuredSampleCount, Mode=OneWay}" />
+                          </TextBlock>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+                <TextBlock Text="Compare A (selected above) with B:" Margin="0,8,0,4" />
+                <ComboBox ItemsSource="{Binding BenchmarkHistory}" SelectedItem="{Binding SelectedBenchmarkB}" DisplayMemberPath="DisplayTitle" Margin="0,0,0,8" />
+                <WrapPanel>
+                  <Button Content="Compare A vs B" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CompareBenchmarksCommand}" Margin="0,0,8,8" />
+                  <Button Content="Export JSON" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ExportBenchmarkJsonCommand}" Margin="0,0,8,8" />
+                  <Button Content="Export CSV" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ExportBenchmarkCsvCommand}" Margin="0,0,8,8" />
+                  <Button Content="Delete A" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding DeleteBenchmarkCommand}" Margin="0,0,8,8" />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}"
+                    Visibility="{Binding HasBenchmarkComparison, Converter={StaticResource BoolToVisibilityConverter}}">
+              <StackPanel>
+                <TextBlock Text="{Binding BenchmarkComparisonSummary}" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,8" />
+                <ItemsControl ItemsSource="{Binding BenchmarkComparisonRows}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="2*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding Metric}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="1" Text="{Binding Before, StringFormat={}{0:0.##}}" />
+                        <TextBlock Grid.Column="2" Text="{Binding After, StringFormat={}{0:0.##}}" />
+                        <TextBlock Grid.Column="3">
+                          <Run Text="{Binding Difference, Mode=OneWay, StringFormat={}{0:+0.##;-0.##;0}}" />
+                          <Run Text="{Binding Unit, Mode=OneWay}" />
+                        </TextBlock>
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
 
         <!-- Settings -->
         <ScrollViewer Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Settings}">
