@@ -42,6 +42,7 @@
           <Button Content="Profiles" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Profiles" />
           <Button Content="Backups" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Backups" />
           <Button Content="Benchmark" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Benchmark" />
+          <Button Content="Optimize &amp; Benchmark" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Guided" />
           <Button Content="Settings" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Settings" />
         </StackPanel>
       </DockPanel>
@@ -594,6 +595,127 @@
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- Guided Optimize & Benchmark -->
+        <ScrollViewer Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Guided}">
+          <StackPanel>
+            <TextBlock Text="Optimize &amp; Benchmark" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,12"
+                       Text="Guided flow: baseline benchmark → preview → your confirmation → backup → apply profile settings → verify → post benchmark → compare → keep or restore. No FPS guarantees. No injection. CS2 should already be running for benchmarks." />
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Selection</TextBlock>
+                <TextBlock Margin="0,0,0,4">
+                  <Run Text="Profile:" />
+                  <Run Text="{Binding SelectedProfile.Name, Mode=OneWay, FallbackValue=—}" FontWeight="SemiBold" />
+                </TextBlock>
+                <TextBlock Text="{Binding SelectedProfile.Description, Mode=OneWay, FallbackValue=}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" />
+                <TextBlock Margin="0,0,0,4">
+                  <Run Text="Benchmark:" />
+                  <Run Text="{Binding BenchmarkDurationSeconds, Mode=OneWay}" />
+                  <Run Text="s · interval" />
+                  <Run Text="{Binding BenchmarkSampleIntervalMs, Mode=OneWay}" />
+                  <Run Text="ms · warm-up" />
+                  <Run Text="{Binding BenchmarkWarmupSeconds, Mode=OneWay}" />
+                  <Run Text="s (same for before/after)" />
+                </TextBlock>
+                <TextBlock Margin="0,0,0,8">
+                  <Run Text="Status:" />
+                  <Run Text="{Binding GuidedStatusText, Mode=OneWay}" FontWeight="SemiBold" />
+                  <Run Text="·" />
+                  <Run Text="{Binding GuidedProgressPercent, Mode=OneWay, StringFormat={}{0:0} %}" />
+                </TextBlock>
+                <TextBlock Text="{Binding GuidedProgressMessage}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <WrapPanel>
+                  <Button Content="Preview Only" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding PreviewGuidedCommand}" Margin="0,0,8,8" />
+                  <Button Content="Run Guided Optimization" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding StartGuidedCommand}" Margin="0,0,8,8" />
+                  <Button Content="Confirm Apply" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ConfirmGuidedCommand}" Margin="0,0,8,8" />
+                  <Button Content="Cancel" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CancelGuidedCommand}" Margin="0,0,8,8" />
+                  <Button Content="Keep Changes" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding KeepGuidedCommand}" Margin="0,0,8,8" />
+                  <Button Content="Restore Previous" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RestoreGuidedCommand}" Margin="0,0,8,8" />
+                </WrapPanel>
+                <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" TextWrapping="Wrap"
+                           Text="Confirm Apply is required after the baseline and diff. Keep/Restore appear after comparison. Backup failure aborts apply." />
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Progress log</TextBlock>
+                <ItemsControl ItemsSource="{Binding GuidedProgressLines}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="12" Margin="0,2" Foreground="{StaticResource TextSecondaryBrush}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Last guided summary</TextBlock>
+                <TextBlock Text="{Binding LastGuidedSummary}" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12"
+                    Visibility="{Binding HasGuidedComparison, Converter={StaticResource BoolToVisibilityConverter}}">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Comparison (measured metrics only)</TextBlock>
+                <ItemsControl ItemsSource="{Binding GuidedComparisonRows}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="2*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="2*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding Metric}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="1" Text="{Binding Before, StringFormat={}{0:0.##}}" />
+                        <TextBlock Grid.Column="2" Text="{Binding After, StringFormat={}{0:0.##}}" />
+                        <TextBlock Grid.Column="3" Text="{Binding AbsoluteDifference, StringFormat={}{0:+0.##;-0.##;0}}" />
+                        <TextBlock Grid.Column="4" Text="{Binding Interpretation}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}">
+              <StackPanel>
+                <DockPanel Margin="0,0,0,8">
+                  <TextBlock Text="Guided history" FontWeight="SemiBold" />
+                  <Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshGuidedHistoryCommand}" Style="{StaticResource NavButtonStyle}" Padding="8,4" />
+                </DockPanel>
+                <ListBox ItemsSource="{Binding GuidedHistory}" SelectedItem="{Binding SelectedGuidedRun}"
+                         Background="Transparent" BorderThickness="0" MaxHeight="200">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,6" Padding="10">
+                        <StackPanel>
+                          <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" />
+                          <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12">
+                            <Run Text="{Binding Classification, Mode=OneWay}" />
+                            <Run Text="·" />
+                            <Run Text="{Binding UserDecision, Mode=OneWay}" />
+                            <Run Text="· baseline" />
+                            <Run Text="{Binding InitialBenchmarkId, Mode=OneWay}" />
+                          </TextBlock>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
               </StackPanel>
             </Border>
           </StackPanel>

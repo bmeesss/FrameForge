@@ -23,6 +23,8 @@ public sealed class MainViewModel : ViewModelBase
     private readonly ICs2SettingCatalog _settingCatalog;
     private readonly IBenchmarkEngine _benchmarkEngine;
     private readonly IBenchmarkStore _benchmarkStore;
+    private readonly IGuidedOptimizationService _guided;
+    private readonly IGuidedOptimizationStore _guidedStore;
     private readonly IAppLog _log;
 
     private string _currentPage = "Home";
@@ -51,6 +53,8 @@ public sealed class MainViewModel : ViewModelBase
         ICs2SettingCatalog settingCatalog,
         IBenchmarkEngine benchmarkEngine,
         IBenchmarkStore benchmarkStore,
+        IGuidedOptimizationService guided,
+        IGuidedOptimizationStore guidedStore,
         IAppLog log)
     {
         _dashboardService = dashboardService;
@@ -65,7 +69,25 @@ public sealed class MainViewModel : ViewModelBase
         _settingCatalog = settingCatalog;
         _benchmarkEngine = benchmarkEngine;
         _benchmarkStore = benchmarkStore;
+        _guided = guided;
+        _guidedStore = guidedStore;
         _log = log;
+        _guided.StatusChanged += (_, _) =>
+        {
+            RaisePropertyChanged(nameof(GuidedStatusText));
+            RaisePropertyChanged(nameof(IsGuidedRunning));
+            RaisePropertyChanged(nameof(IsGuidedAwaitingConfirmation));
+            RaisePropertyChanged(nameof(IsGuidedAwaitingDecision));
+            RaiseCanExecutes();
+        };
+        _guided.ProgressChanged += (_, p) =>
+        {
+            GuidedProgressMessage = p.Message;
+            if (p.ProgressPercent is not null)
+            {
+                GuidedProgressPercent = p.ProgressPercent.Value;
+            }
+        };
         _benchmarkEngine.StatusChanged += (_, _) =>
         {
             RaisePropertyChanged(nameof(BenchmarkStatusText));
@@ -149,6 +171,14 @@ public sealed class MainViewModel : ViewModelBase
         ExportBenchmarkJsonCommand = new AsyncRelayCommand(ExportBenchmarkJsonAsync, () => SelectedBenchmarkA is not null);
         ExportBenchmarkCsvCommand = new AsyncRelayCommand(ExportBenchmarkCsvAsync, () => SelectedBenchmarkA is not null);
         DeleteBenchmarkCommand = new AsyncRelayCommand(DeleteSelectedBenchmarkAsync, () => SelectedBenchmarkA is not null && !IsBenchmarkRunning);
+
+        StartGuidedCommand = new AsyncRelayCommand(StartGuidedAsync, () => !IsGuidedRunning && !IsBenchmarkRunning && SelectedProfile is not null);
+        PreviewGuidedCommand = new AsyncRelayCommand(PreviewGuidedAsync, () => !IsGuidedRunning && SelectedProfile is not null);
+        ConfirmGuidedCommand = new RelayCommand(() => _guided.ConfirmApply(), () => IsGuidedAwaitingConfirmation);
+        CancelGuidedCommand = new RelayCommand(() => _guided.Cancel(), () => IsGuidedRunning);
+        KeepGuidedCommand = new RelayCommand(() => _guided.Decide(GuidedUserDecision.Keep), () => IsGuidedAwaitingDecision);
+        RestoreGuidedCommand = new RelayCommand(() => _guided.Decide(GuidedUserDecision.Restore), () => IsGuidedAwaitingDecision);
+        RefreshGuidedHistoryCommand = new AsyncRelayCommand(LoadGuidedHistoryAsync, () => !IsBusy);
     }
 
     public ObservableCollection<OptimizationListItem> Optimizations { get; } = new();
@@ -162,6 +192,9 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<BenchmarkRun> BenchmarkHistory { get; } = new();
     public ObservableCollection<BenchmarkChartPoint> BenchmarkChartPoints { get; } = new();
     public ObservableCollection<BenchmarkComparisonMetric> BenchmarkComparisonRows { get; } = new();
+    public ObservableCollection<GuidedOptimizationRun> GuidedHistory { get; } = new();
+    public ObservableCollection<GuidedComparisonRow> GuidedComparisonRows { get; } = new();
+    public ObservableCollection<string> GuidedProgressLines { get; } = new();
     public IReadOnlyList<int> BenchmarkDurationOptions { get; } = BenchmarkConfiguration.AllowedDurationsSeconds;
 
     public bool HasSelectedOptimizations => Optimizations.Any(o => o.IsSelected);
@@ -276,6 +309,7 @@ public sealed class MainViewModel : ViewModelBase
                 RaisePropertyChanged(nameof(IsBackupsPage));
                 RaisePropertyChanged(nameof(IsSettingsPage));
                 RaisePropertyChanged(nameof(IsBenchmarkPage));
+                RaisePropertyChanged(nameof(IsGuidedPage));
             }
         }
     }
@@ -287,6 +321,7 @@ public sealed class MainViewModel : ViewModelBase
     public bool IsBackupsPage => CurrentPage.Equals("Backups", StringComparison.OrdinalIgnoreCase);
     public bool IsSettingsPage => CurrentPage.Equals("Settings", StringComparison.OrdinalIgnoreCase);
     public bool IsBenchmarkPage => CurrentPage.Equals("Benchmark", StringComparison.OrdinalIgnoreCase);
+    public bool IsGuidedPage => CurrentPage.Equals("Guided", StringComparison.OrdinalIgnoreCase);
 
     public string StatusMessage
     {
@@ -398,6 +433,96 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand ExportBenchmarkJsonCommand { get; }
     public ICommand ExportBenchmarkCsvCommand { get; }
     public ICommand DeleteBenchmarkCommand { get; }
+    public ICommand StartGuidedCommand { get; }
+    public ICommand PreviewGuidedCommand { get; }
+    public ICommand ConfirmGuidedCommand { get; }
+    public ICommand CancelGuidedCommand { get; }
+    public ICommand KeepGuidedCommand { get; }
+    public ICommand RestoreGuidedCommand { get; }
+    public ICommand RefreshGuidedHistoryCommand { get; }
+
+    public bool IsGuidedRunning =>
+        _guided.Status is not GuidedOptimizationStatus.Idle
+        and not GuidedOptimizationStatus.Completed
+        and not GuidedOptimizationStatus.Failed
+        and not GuidedOptimizationStatus.Cancelled
+        and not GuidedOptimizationStatus.Restored;
+
+    public bool IsGuidedAwaitingConfirmation => _guided.Status == GuidedOptimizationStatus.AwaitingConfirmation;
+    public bool IsGuidedAwaitingDecision => _guided.Status == GuidedOptimizationStatus.AwaitingDecision;
+    public string GuidedStatusText => _guided.Status.ToString();
+
+    public string GuidedProgressMessage
+    {
+        get => _guidedProgressMessage;
+        set
+        {
+            if (SetProperty(ref _guidedProgressMessage, value))
+            {
+                GuidedProgressLines.Insert(0, value);
+                while (GuidedProgressLines.Count > 40)
+                {
+                    GuidedProgressLines.RemoveAt(GuidedProgressLines.Count - 1);
+                }
+            }
+        }
+    }
+    private string _guidedProgressMessage = "Idle — select a profile, then Preview or Run Guided Optimization.";
+
+    public double GuidedProgressPercent
+    {
+        get => _guidedProgressPercent;
+        set => SetProperty(ref _guidedProgressPercent, value);
+    }
+    private double _guidedProgressPercent;
+
+    public GuidedOptimizationRun? LastGuidedRun
+    {
+        get => _lastGuidedRun;
+        set
+        {
+            if (SetProperty(ref _lastGuidedRun, value))
+            {
+                GuidedComparisonRows.Clear();
+                if (value is not null)
+                {
+                    foreach (var r in value.ComparisonRows)
+                    {
+                        GuidedComparisonRows.Add(r);
+                    }
+                }
+                RaisePropertyChanged(nameof(LastGuidedSummary));
+                RaisePropertyChanged(nameof(HasGuidedComparison));
+            }
+        }
+    }
+    private GuidedOptimizationRun? _lastGuidedRun;
+
+    public string LastGuidedSummary
+    {
+        get
+        {
+            var r = LastGuidedRun;
+            if (r is null) return "No guided run yet.";
+            return $"{r.Status} · {r.Classification} · decision={r.UserDecision} · backup={r.BackupId ?? "—"} · {r.ClassificationReason}";
+        }
+    }
+
+    public bool HasGuidedHistory => GuidedHistory.Count > 0;
+    public bool HasGuidedComparison => GuidedComparisonRows.Count > 0;
+
+    public GuidedOptimizationRun? SelectedGuidedRun
+    {
+        get => _selectedGuidedRun;
+        set
+        {
+            if (SetProperty(ref _selectedGuidedRun, value) && value is not null)
+            {
+                LastGuidedRun = value;
+            }
+        }
+    }
+    private GuidedOptimizationRun? _selectedGuidedRun;
 
     public bool IsBenchmarkRunning =>
         _benchmarkEngine.Status is BenchmarkStatus.Preparing or BenchmarkStatus.Running or BenchmarkStatus.Stopping;
@@ -553,6 +678,13 @@ public sealed class MainViewModel : ViewModelBase
         (ExportBenchmarkJsonCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (ExportBenchmarkCsvCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (DeleteBenchmarkCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (StartGuidedCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (PreviewGuidedCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (ConfirmGuidedCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (CancelGuidedCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (KeepGuidedCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (RestoreGuidedCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (RefreshGuidedHistoryCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
     }
 
     private async Task RefreshAsync()
@@ -606,6 +738,7 @@ public sealed class MainViewModel : ViewModelBase
             await LoadCs2ConfigPreviewAsync().ConfigureAwait(true);
             await LoadCs2SettingsAsync().ConfigureAwait(true);
             await LoadBenchmarkHistoryAsync().ConfigureAwait(true);
+            await LoadGuidedHistoryAsync().ConfigureAwait(true);
 
             _hasLoaded = true;
             RaisePropertyChanged(nameof(HasOptimizations));
@@ -1489,6 +1622,149 @@ public sealed class MainViewModel : ViewModelBase
         }
     }
 
+
+
+    private async Task LoadGuidedHistoryAsync()
+    {
+        try
+        {
+            var list = await _guidedStore.ListAsync().ConfigureAwait(true);
+            GuidedHistory.Clear();
+            foreach (var run in list)
+            {
+                GuidedHistory.Add(run);
+            }
+            RaisePropertyChanged(nameof(HasGuidedHistory));
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning($"Guided history load failed: {ex.Message}");
+        }
+    }
+
+    private GuidedOptimizationRequest BuildGuidedRequest(bool previewOnly)
+    {
+        return new GuidedOptimizationRequest
+        {
+            TargetKind = GuidedTargetKind.Profile,
+            ProfileId = SelectedProfile?.Id ?? Settings.ActiveProfileId,
+            ProfileName = SelectedProfile?.Name,
+            PreviewOnly = previewOnly,
+            RequireCs2ProcessForBenchmark = !previewOnly,
+            BenchmarkConfiguration = new BenchmarkConfiguration
+            {
+                DurationSeconds = BenchmarkDurationSeconds,
+                SampleIntervalMs = BenchmarkSampleIntervalMs,
+                WarmupSeconds = BenchmarkWarmupSeconds,
+                ProfileId = SelectedProfile?.Id,
+                ProfileName = SelectedProfile?.Name
+            },
+            Label = SelectedProfile?.Name
+        };
+    }
+
+    private async Task PreviewGuidedAsync()
+    {
+        if (SelectedProfile is null)
+        {
+            StatusMessage = "Select a profile first.";
+            return;
+        }
+
+        ErrorMessage = null;
+        GuidedProgressLines.Clear();
+        StatusMessage = "Guided preview…";
+        try
+        {
+            var run = await _guided.PreviewAsync(BuildGuidedRequest(previewOnly: true)).ConfigureAwait(true);
+            LastGuidedRun = run;
+            if (run.PreviewDiff is not null)
+            {
+                PendingDiff = run.PreviewDiff;
+                PendingDiffSummary = run.PreviewDiff.HasChanges
+                    ? $"Preview: {run.PreviewDiff.ChangeCount} change(s) — no files written."
+                    : "Preview: already matches profile.";
+            }
+            StatusMessage = run.Status == GuidedOptimizationStatus.Completed
+                ? "Preview complete (no modifications)."
+                : run.Error ?? run.Status.ToString();
+            if (!string.IsNullOrWhiteSpace(run.Error))
+            {
+                ErrorMessage = run.Error;
+            }
+            await LoadGuidedHistoryAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            StatusMessage = "Preview failed.";
+        }
+        finally
+        {
+            RaiseCanExecutes();
+        }
+    }
+
+    private async Task StartGuidedAsync()
+    {
+        if (SelectedProfile is null)
+        {
+            StatusMessage = "Select a profile first.";
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            "Start guided optimization?\n\n" +
+            "1) Baseline benchmark (CS2 should be running)\n" +
+            "2) Preview diff — you must confirm before apply\n" +
+            "3) Backup + apply profile settings\n" +
+            "4) Post benchmark + compare\n" +
+            "5) Keep or Restore\n\n" +
+            "FrameForge does not guarantee FPS improvements. Close extra apps for repeatability.",
+            "Guided Optimization",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question,
+            MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            StatusMessage = "Guided run cancelled.";
+            return;
+        }
+
+        ErrorMessage = null;
+        GuidedProgressLines.Clear();
+        GuidedProgressPercent = 0;
+        StatusMessage = "Guided optimization running…";
+        CurrentPage = "Guided";
+
+        try
+        {
+            var runTask = _guided.RunAsync(BuildGuidedRequest(previewOnly: false));
+
+            // Poll UI while waiting for confirmation / decision is driven by commands
+            var run = await runTask.ConfigureAwait(true);
+            LastGuidedRun = run;
+            if (!string.IsNullOrWhiteSpace(run.Error) && run.Status == GuidedOptimizationStatus.Failed)
+            {
+                ErrorMessage = run.Error;
+            }
+            StatusMessage = $"Guided finished: {run.Status} / {run.Classification} / {run.UserDecision}";
+            await LoadGuidedHistoryAsync().ConfigureAwait(true);
+            await LoadBenchmarkHistoryAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            StatusMessage = "Guided run failed.";
+            _log.LogError("Guided run failed.", ex);
+        }
+        finally
+        {
+            RaiseCanExecutes();
+            RaisePropertyChanged(nameof(IsGuidedRunning));
+            RaisePropertyChanged(nameof(GuidedStatusText));
+        }
+    }
 
     private async Task LoadBenchmarkHistoryAsync()
     {

@@ -5,6 +5,7 @@ using FrameForge.CS2.Settings;
 using FrameForge.Hardware;
 using FrameForge.Infrastructure.Backup;
 using FrameForge.Infrastructure.Dashboard;
+using FrameForge.Infrastructure.Guided;
 using FrameForge.Infrastructure.Logging;
 using FrameForge.Infrastructure.Paths;
 using FrameForge.Infrastructure.Profiles;
@@ -41,6 +42,8 @@ public static class ServiceRegistration
         services.AddSingleton<IPerformanceSampler, OsPerformanceSampler>();
         services.AddSingleton<IBenchmarkStore, BenchmarkStore>();
         services.AddSingleton<IBenchmarkEngine, BenchmarkEngine>();
+        services.AddSingleton<IGuidedOptimizationStore, GuidedOptimizationStore>();
+        services.AddSingleton<IGuidedOptimizationService, GuidedOptimizationService>();
         return services;
     }
 

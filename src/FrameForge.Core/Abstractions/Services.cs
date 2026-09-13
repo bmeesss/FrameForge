@@ -147,6 +147,7 @@ public interface IPathService
     string ProfilesDirectory { get; }
     string BackupMetadataPath { get; }
     string BenchmarksDirectory { get; }
+    string GuidedRunsDirectory { get; }
 }
 
 /// <summary>
@@ -196,4 +197,47 @@ public interface IBenchmarkCalculator
 {
     BenchmarkResult Calculate(IReadOnlyList<BenchmarkSample> samples);
     BenchmarkComparison Compare(BenchmarkRun before, BenchmarkRun after);
+}
+
+/// <summary>
+/// Orchestrates Benchmark → Preview → Confirm → Backup → Apply → Re-benchmark → Compare → Keep/Restore.
+/// CS2 cfg apply uses existing ICs2SettingsService only. No Windows registry tweaks.
+/// </summary>
+public interface IGuidedOptimizationService
+{
+    GuidedOptimizationStatus Status { get; }
+    GuidedOptimizationRun? CurrentRun { get; }
+
+    event EventHandler<GuidedOptimizationProgress>? ProgressChanged;
+    event EventHandler? StatusChanged;
+
+    /// <summary>Preview only: detect, validate, diff — no file changes.</summary>
+    Task<GuidedOptimizationRun> PreviewAsync(
+        GuidedOptimizationRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Full guided workflow. Blocks at AwaitingConfirmation until ConfirmAsync/CancelAsync,
+    /// and at AwaitingDecision until DecideAsync.
+    /// </summary>
+    Task<GuidedOptimizationRun> RunAsync(
+        GuidedOptimizationRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>User confirms apply after preview (AwaitingConfirmation).</summary>
+    void ConfirmApply();
+
+    /// <summary>User cancels while awaiting confirmation or before apply completes setup.</summary>
+    void Cancel();
+
+    /// <summary>Keep or restore after comparison (AwaitingDecision).</summary>
+    void Decide(GuidedUserDecision decision);
+}
+
+public interface IGuidedOptimizationStore
+{
+    Task<string> SaveAsync(GuidedOptimizationRun run, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<GuidedOptimizationRun>> ListAsync(CancellationToken cancellationToken = default);
+    Task<GuidedOptimizationRun?> GetAsync(string runId, CancellationToken cancellationToken = default);
+    Task DeleteAsync(string runId, CancellationToken cancellationToken = default);
 }

@@ -21,8 +21,9 @@ It analyzes your PC and CS2 installation, recommends **safe** optimizations, man
 - **Profiles** — schema v1 Competitive / Balanced / Quality + custom CRUD/import/export. Apply uses the same real-cfg path as Settings.
 - **Backups** — file snapshots + metadata; restore returns exact previous bytes; files created by an apply are deleted on restore.
 - **Benchmark engine** — external OS-level session to compare system states (before/after). CPU, process CPU/memory, system memory; GPU util/temps and CS2 frame-time marked unavailable without injection. Local JSON history, A/B comparison, JSON/CSV export. **Does not guarantee FPS improvements.**
+- **Guided Optimize & Benchmark** — orchestrated baseline → preview → **explicit confirm** → backup → apply → verify → post-benchmark → compare → Keep|Restore. Uses the same settings apply path only. Local guided-run history. **No FPS guarantees.**
 - **Logging** — structured local logs; secrets redacted.
-- **UI** — dark WPF shell with loading/empty/error states and confirmation dialogs. Execution status warning when the managed cfg is not wired into autoexec. Benchmark page with live sample timeline.
+- **UI** — dark WPF shell with loading/empty/error states and confirmation dialogs. Execution status warning when the managed cfg is not wired into autoexec. Benchmark page with live sample timeline. Optimize & Benchmark page with step progress and Keep/Restore.
 
 ## How FrameForge modifies CS2 configuration
 
@@ -184,6 +185,78 @@ Default 100 ms interval; each sample is a few OS counter / process property read
 
 Select two history runs (A and B). The UI shows metric, before, after, absolute difference, and percent difference for **available** metrics only. Unavailable metrics stay labeled unavailable.
 
+## Guided Optimize & Benchmark
+
+Orchestrates existing systems into one safe A/B workflow. It does **not** invent a second apply path and does **not** change Windows registry, power plans, or startup items.
+
+### Workflow
+
+1. **Select** a profile (or explicit settings map) — never auto-apply “all optimizations”.
+2. **Validate** install + desired values; tip to close extra apps for repeatability.
+3. **CS2 process check** for benchmarks — if CS2 is not running, FrameForge explains and stops. It does **not** launch CS2.
+4. **Baseline benchmark** with the configured duration / interval / warm-up.
+5. **Preview diff** (files, values, risk) — **Preview only** mode stops here (detect/validate/diff, no writes).
+6. **Explicit Confirm Apply** — required; cannot be skipped.
+7. **Backup** managed cfg + autoexec. Backup failure → **STOP** (no apply).
+8. **Apply** via existing `ICs2SettingsService.ApplyDiffAsync` only → **verify**. Verify failure → auto-restore → run ends Restored/Failed.
+9. **Post benchmark** with the **same** duration / interval / warm-up as the baseline.
+10. **Compare** measured metrics → classification (see below).
+11. **Keep** (leave cfg) or **Restore** (backup restore + verify). Benchmark history is never deleted on restore.
+12. **Persist** the guided run under local `GuidedRuns/`.
+
+### States
+
+`Idle` → `Preparing` → `BenchmarkingBefore` → `PreparingOptimization` → `AwaitingConfirmation` → `Applying` → `BenchmarkingAfter` → `Comparing` → `AwaitingDecision` → `Completed` | `Restoring` → `Restored` | `Cancelled` | `Failed`.
+
+### Condition warnings
+
+If CPU / GPU / RAM / OS / CS2 process / profile / duration / interval / power / resolution / refresh differ between baseline and post (when known), FrameForge warns that the comparison **may not be reliable**. Warnings rarely hard-block; they are recorded on the run.
+
+### Comparison & classification
+
+Rows: metric · before · after · Δ · % · interpretation. Unavailable metrics stay **N/A**. FrameForge **never invents FPS**.
+
+Classification uses **measured** metrics only (noise band ≈ 3% + metric epsilons; preferred direction is usually “lower is better” for CPU/memory load):
+
+| Result | Rule (summary) |
+|--------|----------------|
+| **Improved** | All available decisive metrics moved in the preferred direction beyond noise |
+| **Regressed** | All available decisive metrics moved against the preferred direction beyond noise |
+| **Neutral** | Changes within noise / no decisive movement |
+| **Mixed** | Some improved and some regressed beyond noise |
+| **Inconclusive** | No usable metrics (e.g. all N/A) |
+
+There is **no auto “this improved your FPS”** claim. Results depend on conditions (background load, map, resolution, power mode, etc.).
+
+### Cancel safety
+
+- **Before apply** (including at confirmation): stop cleanly; no cfg changes.
+- **During apply**: let apply/rollback finish via the settings service.
+- **During benchmark**: stop the engine; prior cfg is preserved if apply has not succeeded.
+
+### Storage
+
+```text
+%LocalAppData%/FrameForge/GuidedRuns/<id>.json
+```
+
+Corrupt history files are skipped; valid runs still list.
+
+### Limits (Phase 5)
+
+- No registry / power-plan / startup / system mods.
+- No second write path — only existing CS2 settings apply + backup.
+- No guaranteed performance gains.
+- Frame-time / GPU still unavailable without injection (same as Benchmark).
+
+### Example workflows
+
+**Preview only:** select Competitive → *Preview Only* → review diff → no files written.
+
+**Full keep:** start CS2 → select Balanced → *Run Guided Optimization* → baseline finishes → *Confirm Apply* → post benchmark → *Keep Changes*.
+
+**Full restore:** same as full keep through comparison → *Restore Previous* → cfg returned to pre-apply backup; baseline/post benchmark JSON remain in history.
+
 ## Not implemented yet (honest)
 
 - Automatic Windows power-plan / registry tweaks (advisory only)
@@ -193,8 +266,9 @@ Select two history runs (A and B). The UI shows metric, before, after, absolute 
 - CS2 render frame-time without injection (not possible under our safety rules)
 - GPU utilization via documented counters without vendor lock-in
 - **Automatic** Steam launch-option editing (manual recommendation only)
-- Automatic “benchmark → apply → re-benchmark → restore” workflow (Phase 5 candidate)
 - Binary / `video.txt` graphics quality sliders
+- Multi-setting picker UI beyond profile / map targets (API supports maps; UI uses active profile)
+- Continuous / scheduled guided runs
 
 ## Tech stack
 
@@ -214,7 +288,7 @@ src/
   FrameForge.CS2              Steam / CS2 detect + cfg + settings + autoexec integration
   FrameForge.Optimization     Catalog, pipeline, score
   FrameForge.Benchmark        External benchmark engine + OS sampler
-  FrameForge.Infrastructure   DI, backup, profiles, logs
+  FrameForge.Infrastructure   DI, backup, profiles, logs, guided optimization
 tests/
   FrameForge.Tests
 assets/profiles/              Built-in profile JSON (schema v1)
