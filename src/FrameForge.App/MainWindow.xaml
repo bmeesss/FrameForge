@@ -1,0 +1,1399 @@
+<Window x:Class="FrameForge.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="FrameForge — CS2 Performance Companion"
+        Height="740" Width="1120"
+        MinHeight="620" MinWidth="920"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource BgPrimaryBrush}">
+  <Grid>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="220" />
+      <ColumnDefinition Width="*" />
+    </Grid.ColumnDefinitions>
+
+    <!-- Sidebar -->
+    <Border Grid.Column="0" Background="{StaticResource BgSecondaryBrush}" Padding="16">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,24">
+          <TextBlock Text="FrameForge" FontSize="22" FontWeight="SemiBold" />
+          <TextBlock Text="Legitimate CS2 companion" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" />
+        </StackPanel>
+
+        <StackPanel DockPanel.Dock="Bottom">
+          <TextBlock Text="{Binding StatusMessage}"
+                     Foreground="{StaticResource TextSecondaryBrush}"
+                     TextWrapping="Wrap"
+                     FontSize="12"
+                     Margin="0,0,0,8" />
+          <TextBlock Text="Working…"
+                     Foreground="{StaticResource AccentBrush}"
+                     Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}"
+                     Margin="0,0,0,8" />
+          <Button Content="Refresh"
+                  Style="{StaticResource PrimaryButtonStyle}"
+                  Command="{Binding RefreshCommand}" />
+        </StackPanel>
+
+        <StackPanel>
+          <Button Content="Home" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Home"
+                  AutomationProperties.Name="Navigate to Home dashboard" />
+          <Button Content="Optimize" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Optimize" />
+          <Button Content="CS2 Settings" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Cs2" />
+          <Button Content="Profiles" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Profiles" />
+          <Button Content="Backups" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Backups" />
+          <Button Content="Benchmark" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Benchmark" />
+          <Button Content="Optimize &amp; Benchmark" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Guided" />
+          <Button Content="Custom Optimization" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Custom" />
+          <Button Content="Performance History" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Performance" />
+          <Button Content="Settings" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Settings" />
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <!-- Content -->
+    <Grid Grid.Column="1" Margin="24">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+      </Grid.RowDefinitions>
+
+      <!-- Error banner (not color-only — includes text + dismiss) -->
+      <Border Grid.Row="0"
+              Background="#33EF4444"
+              BorderBrush="{StaticResource DangerBrush}"
+              BorderThickness="1"
+              CornerRadius="8"
+              Padding="12"
+              Margin="0,0,0,12"
+              Visibility="{Binding HasError, Converter={StaticResource BoolToVisibilityConverter}}"
+              AutomationProperties.Name="Error message">
+        <DockPanel>
+          <Button DockPanel.Dock="Right"
+                  Content="Dismiss"
+                  Command="{Binding ClearErrorCommand}"
+                  Style="{StaticResource NavButtonStyle}"
+                  Padding="8,4"
+                  AutomationProperties.Name="Dismiss error" />
+          <TextBlock Text="{Binding ErrorMessage}" TextWrapping="Wrap" VerticalAlignment="Center"
+                     AutomationProperties.LiveSetting="Assertive" />
+        </DockPanel>
+      </Border>
+
+      <Grid Grid.Row="1">
+        <!-- Home -->
+        <ScrollViewer Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Home}">
+          <StackPanel>
+            <TextBlock Text="Dashboard" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,16" />
+            <UniformGrid Columns="2">
+              <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,12,12">
+                <StackPanel>
+                  <TextBlock Text="CS2 Status" Foreground="{StaticResource TextSecondaryBrush}" />
+                  <TextBlock Text="{Binding Dashboard.Cs2.DetectionMessage}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Dashboard.Cs2.InstallPath}" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,6,0,0" />
+                </StackPanel>
+              </Border>
+              <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+                <StackPanel>
+                  <TextBlock Text="Optimization Score" Foreground="{StaticResource TextSecondaryBrush}" />
+                  <TextBlock Text="{Binding ScoreDisplay}" FontSize="28" FontWeight="SemiBold" Margin="0,6,0,0" />
+                  <TextBlock Text="{Binding ScoreSummary}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,6,0,0" />
+                </StackPanel>
+              </Border>
+              <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,12,12">
+                <StackPanel>
+                  <TextBlock Text="CPU" Foreground="{StaticResource TextSecondaryBrush}" />
+                  <TextBlock Text="{Binding Dashboard.Hardware.CpuName}" FontSize="16" FontWeight="SemiBold" Margin="0,6,0,0" TextWrapping="Wrap" />
+                  <TextBlock Margin="0,6,0,0" Foreground="{StaticResource TextSecondaryBrush}">
+                    <Run Text="{Binding Dashboard.Hardware.CpuCoreCount, Mode=OneWay}" />
+                    <Run Text="cores /" />
+                    <Run Text="{Binding Dashboard.Hardware.CpuThreadCount, Mode=OneWay}" />
+                    <Run Text="threads" />
+                  </TextBlock>
+                </StackPanel>
+              </Border>
+              <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+                <StackPanel>
+                  <TextBlock Text="GPU / RAM / OS" Foreground="{StaticResource TextSecondaryBrush}" />
+                  <TextBlock Text="{Binding Dashboard.Hardware.GpuName}" Margin="0,6,0,0" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Dashboard.Hardware.FormattedRam}" Margin="0,4,0,0" />
+                  <TextBlock Text="{Binding Dashboard.Hardware.WindowsVersion}" Margin="0,4,0,0" Foreground="{StaticResource TextSecondaryBrush}" />
+                  <TextBlock Text="{Binding Dashboard.Hardware.Architecture}" Margin="0,4,0,0" Foreground="{StaticResource TextSecondaryBrush}" />
+                </StackPanel>
+              </Border>
+            </UniformGrid>
+
+            <Border Style="{StaticResource CardBorderStyle}">
+              <StackPanel>
+                <TextBlock Text="Status" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBlock Text="{Binding Dashboard.OptimizationStatus}" FontSize="16" FontWeight="SemiBold" Margin="0,6,0,0" />
+                <TextBlock Margin="0,6,0,0" Foreground="{StaticResource TextSecondaryBrush}">
+                  <Run Text="Recommendations:" />
+                  <Run Text="{Binding Dashboard.AvailableRecommendationCount, Mode=OneWay}" />
+                  <Run Text="· Applicable now:" />
+                  <Run Text="{Binding Dashboard.ApplicableOptimizationCount, Mode=OneWay}" />
+                  <Run Text="· Backups:" />
+                  <Run Text="{Binding Dashboard.BackupCount, Mode=OneWay}" />
+                </TextBlock>
+                <TextBlock Margin="0,6,0,0">
+                  <Run Text="Active profile:" />
+                  <Run Text="{Binding Dashboard.ActiveProfileName, Mode=OneWay}" />
+                </TextBlock>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}">
+              <StackPanel>
+                <TextBlock Text="Score breakdown" FontWeight="SemiBold" Margin="0,0,0,8" />
+                <ItemsControl ItemsSource="{Binding ScoreFactors}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="56" />
+                          <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock FontWeight="SemiBold">
+                          <Run Text="{Binding Points, Mode=OneWay}" />
+                          <Run Text="pts" />
+                        </TextBlock>
+                        <StackPanel Grid.Column="1">
+                          <TextBlock Text="{Binding Description}" TextWrapping="Wrap" />
+                          <TextBlock Text="{Binding Reason}" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" FontSize="12" />
+                        </StackPanel>
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="FrameForge never injects into CS2, edits memory, or bypasses anti-cheat."
+                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,8,0,0" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- Optimize -->
+        <Grid Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Optimize}">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+          <TextBlock Text="Optimize" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,12" />
+          <TextBlock Grid.Row="1"
+                     Text="No optimizations are registered."
+                     Foreground="{StaticResource TextSecondaryBrush}"
+                     VerticalAlignment="Center"
+                     HorizontalAlignment="Center"
+                     Visibility="{Binding ShowEmptyOptimizations, Converter={StaticResource BoolToVisibilityConverter}}" />
+          <ListBox Grid.Row="1"
+                   ItemsSource="{Binding Optimizations}"
+                   Background="Transparent"
+                   BorderThickness="0"
+                   Visibility="{Binding ShowEmptyOptimizations, Converter={StaticResource InverseBoolToVisibilityConverter}}">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Border Style="{StaticResource CardBorderStyle}">
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Top" Margin="0,4,12,0"
+                              IsEnabled="{Binding CanApply}" />
+                    <StackPanel Grid.Column="1">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="16" />
+                      <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" />
+                      <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" Margin="0,6,0,0" />
+                      <TextBlock Margin="0,8,0,0" Foreground="{StaticResource TextSecondaryBrush}">
+                        <Run Text="{Binding Category, Mode=OneWay}" />
+                        <Run Text="· Risk:" />
+                        <Run Text="{Binding Risk, Mode=OneWay}" />
+                        <Run Text="· Impact:" />
+                        <Run Text="{Binding Impact, Mode=OneWay}" />
+                        <Run Text="·" />
+                        <Run Text="{Binding StatusText, Mode=OneWay}" />
+                      </TextBlock>
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+            <Button Content="Apply Selected (with confirmation)"
+                    Style="{StaticResource PrimaryButtonStyle}"
+                    Command="{Binding ApplySelectedOptimizationsCommand}" />
+            <TextBlock Text="Only applicable items can be selected. Advisory items explain why they cannot auto-apply."
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       VerticalAlignment="Center"
+                       Margin="16,0,0,0"
+                       TextWrapping="Wrap" />
+          </StackPanel>
+        </Grid>
+
+        <!-- CS2 Settings -->
+        <Grid Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Cs2}">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+          <DockPanel Margin="0,0,0,8">
+            <TextBlock Text="CS2 Settings" FontSize="26" FontWeight="SemiBold" />
+            <TextBlock DockPanel.Dock="Right" Text="{Binding Cs2SettingsStatus}"
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="420" />
+          </DockPanel>
+          <StackPanel Grid.Row="1" Margin="0,0,0,8">
+            <TextBlock Text="Settings write to frameforge_settings.cfg in the real CS2 cfg folder. autoexec.cfg gets a marked FRAMEFORGE section that execs that file. User lines outside the markers are never removed."
+                       Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding Cs2AffectedFilesHint}"
+                       Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,4,0,0" FontSize="12" />
+            <Border Background="#332F6FED" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"
+                    CornerRadius="6" Padding="10" Margin="0,8,0,0"
+                    Visibility="{Binding HasCs2ExecutionWarning, Converter={StaticResource BoolToVisibilityConverter}}">
+              <TextBlock Text="{Binding Cs2ExecutionRecommendation}" TextWrapping="Wrap" />
+            </Border>
+          </StackPanel>
+
+          <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="160" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <ListBox ItemsSource="{Binding SettingCategories}"
+                     SelectedItem="{Binding SelectedCategory}"
+                     Background="Transparent" BorderThickness="0"
+                     Margin="0,0,12,0">
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding}" Margin="4,8" />
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <Grid Grid.Column="1">
+              <TextBlock Text="No settings in this category (or CS2 not detected)."
+                         Foreground="{StaticResource TextSecondaryBrush}"
+                         HorizontalAlignment="Center" VerticalAlignment="Center"
+                         Visibility="{Binding ShowEmptySettings, Converter={StaticResource BoolToVisibilityConverter}}" />
+              <ListBox ItemsSource="{Binding SettingRows}"
+                       SelectedItem="{Binding SelectedSetting}"
+                       Background="Transparent" BorderThickness="0"
+                       Visibility="{Binding ShowEmptySettings, Converter={StaticResource InverseBoolToVisibilityConverter}}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <Border Style="{StaticResource CardBorderStyle}">
+                      <Grid>
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="2*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="1.2*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                          <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                          <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0" />
+                          <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0">
+                            <Run Text="{Binding ConfigKey, Mode=OneWay}" />
+                            <Run Text="·" />
+                            <Run Text="{Binding Source, Mode=OneWay}" />
+                            <Run Text="·" />
+                            <Run Text="{Binding AllowedHint, Mode=OneWay}" />
+                          </TextBlock>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="8,0">
+                          <TextBlock Text="Current" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" />
+                          <TextBlock Text="{Binding CurrentValue}" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Margin="8,0">
+                          <TextBlock Text="Recommended" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" />
+                          <TextBlock Text="{Binding RecommendedValue}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="3" Margin="8,0">
+                          <TextBlock Text="Edit" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" />
+                          <TextBox Text="{Binding EditValue, UpdateSourceTrigger=PropertyChanged}" Padding="6,4" />
+                        </StackPanel>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Grid>
+          </Grid>
+
+          <Border Grid.Row="3" Style="{StaticResource CardBorderStyle}" Margin="0,12,0,0"
+                  Visibility="{Binding HasPendingDiff, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel>
+              <TextBlock Text="{Binding PendingDiffSummary}" FontWeight="SemiBold" Margin="0,0,0,8" />
+              <ItemsControl ItemsSource="{Binding DiffEntries}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Margin="0,2" TextWrapping="Wrap">
+                      <Run Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold" />
+                      <Run Text=":" />
+                      <Run Text="{Binding CurrentValue, Mode=OneWay}" />
+                      <Run Text="→" />
+                      <Run Text="{Binding NewValue, Mode=OneWay}" />
+                      <Run Text="(" />
+                      <Run Text="{Binding Reason, Mode=OneWay}" />
+                      <Run Text="· Risk" />
+                      <Run Text="{Binding Risk, Mode=OneWay}" />
+                      <Run Text=")" />
+                    </TextBlock>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+
+          <WrapPanel Grid.Row="4" Margin="0,12,0,0">
+            <Button Content="Preview changes" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding PreviewSettingsApplyCommand}" Margin="0,0,8,8" />
+            <Button Content="Apply (confirm + backup)" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ApplySettingsDiffCommand}" Margin="0,0,8,8" />
+            <Button Content="Clear diff" Style="{StaticResource NavButtonStyle}" Command="{Binding ClearSettingsDiffCommand}" Margin="0,0,8,8" />
+            <Button Content="Save as Profile" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveAsProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Compare with Profile" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CompareWithProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Reset FrameForge changes" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ResetFrameForgeSettingsCommand}" Margin="0,0,8,8" />
+          </WrapPanel>
+        </Grid>
+
+        <!-- Profiles -->
+        <Grid Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Profiles}">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+          <TextBlock Text="Profiles" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,12" />
+          <TextBlock Grid.Row="0" Text="Built-in profiles are protected. Apply always shows a diff and requires confirmation."
+                     Foreground="{StaticResource TextSecondaryBrush}" Margin="120,8,0,12" HorizontalAlignment="Right" />
+          <TextBlock Grid.Row="1"
+                     Text="No profiles loaded."
+                     Foreground="{StaticResource TextSecondaryBrush}"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     Visibility="{Binding ShowEmptyProfiles, Converter={StaticResource BoolToVisibilityConverter}}" />
+          <ListBox Grid.Row="1"
+                   ItemsSource="{Binding Profiles}"
+                   SelectedItem="{Binding SelectedProfile}"
+                   Background="Transparent" BorderThickness="0"
+                   Visibility="{Binding ShowEmptyProfiles, Converter={StaticResource InverseBoolToVisibilityConverter}}">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Border Style="{StaticResource CardBorderStyle}">
+                  <StackPanel>
+                    <DockPanel>
+                      <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold" />
+                      <TextBlock DockPanel.Dock="Right"
+                                 Foreground="{StaticResource TextSecondaryBrush}">
+                        <Run Text="{Binding SettingCount, Mode=OneWay}" />
+                        <Run Text="settings" />
+                      </TextBlock>
+                    </DockPanel>
+                    <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" />
+                    <TextBlock Margin="0,6,0,0" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12">
+                      <Run Text="Updated" />
+                      <Run Text="{Binding UpdatedAt, Mode=OneWay}" />
+                      <Run Text="·" />
+                      <Run Text="{Binding IsBuiltIn, Mode=OneWay, StringFormat=Built-in: {0}}" />
+                      <Run Text="· schema" />
+                      <Run Text="{Binding SchemaVersion, Mode=OneWay}" />
+                    </TextBlock>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <WrapPanel Grid.Row="2" Margin="0,12,0,0">
+            <Button Content="Select / Activate" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ActivateProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Preview diff" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding PreviewProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Apply (diff + confirm)" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ApplyProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Duplicate" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding DuplicateProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Export" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ExportProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Import" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ImportProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Create" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CreateProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Rename" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RenameProfileCommand}" Margin="0,0,8,8" />
+            <Button Content="Delete" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding DeleteProfileCommand}" Margin="0,0,8,8" />
+          </WrapPanel>
+        </Grid>
+
+        <!-- Backups -->
+        <Grid Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Backups}">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+          <TextBlock Text="Backups" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,12" />
+          <TextBlock Grid.Row="1"
+                     Text="No backups yet. Apply an optimization with automatic backup enabled to create one."
+                     Foreground="{StaticResource TextSecondaryBrush}"
+                     TextWrapping="Wrap"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     Visibility="{Binding ShowEmptyBackups, Converter={StaticResource BoolToVisibilityConverter}}" />
+          <ListBox Grid.Row="1"
+                   ItemsSource="{Binding Backups}"
+                   SelectedItem="{Binding SelectedBackup}"
+                   Background="Transparent" BorderThickness="0"
+                   Visibility="{Binding ShowEmptyBackups, Converter={StaticResource InverseBoolToVisibilityConverter}}">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Border Style="{StaticResource CardBorderStyle}">
+                  <StackPanel>
+                    <TextBlock Text="{Binding Id}" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <TextBlock Text="{Binding Timestamp}" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <Button Grid.Row="2" Content="Restore Selected Backup (with confirmation)"
+                  Style="{StaticResource PrimaryButtonStyle}"
+                  HorizontalAlignment="Left"
+                  Command="{Binding RestoreBackupCommand}"
+                  Margin="0,12,0,0"
+                  ToolTip="Requires confirmation. Restores snapshot bytes from the selected backup."
+                  AutomationProperties.Name="Restore selected backup with confirmation"
+                  AutomationProperties.HelpText="Destructive to current cfg — confirmation required." />
+        </Grid>
+
+        <!-- Benchmark -->
+        <ScrollViewer Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Benchmark}">
+          <StackPanel>
+            <TextBlock Text="Benchmark" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,12"
+                       Text="External OS counters only. FrameForge does not inject into CS2, hook DirectX, or invent FPS. Frame-time stays unavailable unless a future external source provides it. Results are stored locally under Benchmarks/." />
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Session</TextBlock>
+                <TextBlock Margin="0,0,0,4">
+                  <Run Text="Engine status:" />
+                  <Run Text="{Binding BenchmarkStatusText, Mode=OneWay}" FontWeight="SemiBold" />
+                  <Run Text=" · Phase:" />
+                  <Run Text="{Binding BenchmarkPhaseText, Mode=OneWay}" FontWeight="SemiBold" />
+                </TextBlock>
+                <TextBlock Text="{Binding BenchmarkLiveStatus}" TextWrapping="Wrap" Margin="0,0,0,4" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBlock Text="{Binding BenchmarkProgressDetail}" TextWrapping="Wrap" Margin="0,0,0,4" FontSize="12" />
+                <ProgressBar Height="8" Minimum="0" Maximum="100" Value="{Binding BenchmarkProgressPercent, Mode=OneWay}" Margin="0,0,0,8"
+                             ToolTip="Progress from the live benchmark engine (not a second fake timer)." />
+                <TextBlock Text="{Binding BenchmarkUnavailableNote}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" TextWrapping="Wrap" />
+                <TextBlock Margin="0,0,0,4">
+                  <Run Text="Active profile:" />
+                  <Run Text="{Binding SelectedProfile.Name, Mode=OneWay, FallbackValue=—}" />
+                </TextBlock>
+                <Grid Margin="0,8,0,0">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Margin="0,0,8,0">
+                    <TextBlock Text="Duration (s)" Margin="0,0,0,4" />
+                    <ComboBox ItemsSource="{Binding BenchmarkDurationOptions}" SelectedItem="{Binding BenchmarkDurationSeconds}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Margin="0,0,8,0">
+                    <TextBlock Text="Sample interval (ms)" Margin="0,0,0,4" />
+                    <TextBox Text="{Binding BenchmarkSampleIntervalMs, UpdateSourceTrigger=PropertyChanged}" Padding="6" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="2">
+                    <TextBlock Text="Warm-up (s)" Margin="0,0,0,4" />
+                    <TextBox Text="{Binding BenchmarkWarmupSeconds, UpdateSourceTrigger=PropertyChanged}" Padding="6" />
+                  </StackPanel>
+                </Grid>
+                <WrapPanel Margin="0,12,0,0">
+                  <Button Content="Start Benchmark" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding StartBenchmarkCommand}" Margin="0,0,8,8"
+                          AutomationProperties.Name="Start external benchmark" ToolTip="Starts OS-level sampling only — no CS2 injection." />
+                  <Button Content="Stop" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding StopBenchmarkCommand}" Margin="0,0,8,8"
+                          AutomationProperties.Name="Stop benchmark early" ToolTip="Finish early and keep partial measured samples." />
+                  <Button Content="Cancel" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CancelBenchmarkCommand}" Margin="0,0,8,8"
+                          IsCancel="True"
+                          AutomationProperties.Name="Cancel benchmark" ToolTip="Cancel and mark run Cancelled. Immediate Stopping… feedback." />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Last result</TextBlock>
+                <TextBlock Text="{Binding LastBenchmarkSummary}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,8,0,0" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap"
+                           Text="P1 / P0.1 are frame-time percentiles (99th / 99.9th) when frame-time exists — not FPS percentiles." />
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12"
+                    Visibility="{Binding HasBenchmarkChart, Converter={StaticResource BoolToVisibilityConverter}}">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Live sample timeline (system/process CPU %)</TextBlock>
+                <ItemsControl ItemsSource="{Binding BenchmarkChartPoints}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <WrapPanel />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Width="6" Height="{Binding Value}" MinHeight="2" MaxHeight="80"
+                              Background="{StaticResource AccentBrush}" Margin="1,0" VerticalAlignment="Bottom"
+                              ToolTip="{Binding Label}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,6,0,0"
+                           Text="Bars are measured samples only (warm-up excluded from chart). Height maps to percent." />
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <DockPanel Margin="0,0,0,8">
+                  <TextBlock Text="History (local JSON)" FontWeight="SemiBold" />
+                  <Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshBenchmarkHistoryCommand}" Style="{StaticResource NavButtonStyle}" Padding="8,4" />
+                </DockPanel>
+                <TextBlock Text="No saved benchmarks yet."
+                           Foreground="{StaticResource TextSecondaryBrush}"
+                           Visibility="{Binding ShowEmptyBenchmarks, Converter={StaticResource BoolToVisibilityConverter}}" />
+                <ListBox ItemsSource="{Binding BenchmarkHistory}"
+                         SelectedItem="{Binding SelectedBenchmarkA}"
+                         Background="Transparent" BorderThickness="0"
+                         Visibility="{Binding ShowEmptyBenchmarks, Converter={StaticResource InverseBoolToVisibilityConverter}}"
+                         MaxHeight="220">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,6" Padding="10">
+                        <StackPanel>
+                          <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" />
+                          <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12">
+                            <Run Text="{Binding Status, Mode=OneWay}" />
+                            <Run Text="· CPU" />
+                            <Run Text="{Binding Result.SystemCpu.Average, Mode=OneWay, StringFormat={}{0:0.0}}" />
+                            <Run Text="% · samples" />
+                            <Run Text="{Binding Result.MeasuredSampleCount, Mode=OneWay}" />
+                          </TextBlock>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+                <TextBlock Text="Compare A (selected above) with B:" Margin="0,8,0,4" />
+                <ComboBox ItemsSource="{Binding BenchmarkHistory}" SelectedItem="{Binding SelectedBenchmarkB}" DisplayMemberPath="DisplayTitle" Margin="0,0,0,8" />
+                <WrapPanel>
+                  <Button Content="Compare A vs B" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CompareBenchmarksCommand}" Margin="0,0,8,8" />
+                  <Button Content="Export JSON" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ExportBenchmarkJsonCommand}" Margin="0,0,8,8" />
+                  <Button Content="Export CSV" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ExportBenchmarkCsvCommand}" Margin="0,0,8,8" />
+                  <Button Content="Delete A" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding DeleteBenchmarkCommand}" Margin="0,0,8,8"
+                          ToolTip="Deletes the selected benchmark run from local history after confirmation."
+                          AutomationProperties.Name="Delete selected benchmark run A" />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}"
+                    Visibility="{Binding HasBenchmarkComparison, Converter={StaticResource BoolToVisibilityConverter}}"
+                    AutomationProperties.Name="Benchmark comparison results">
+              <StackPanel>
+                <TextBlock Text="{Binding BenchmarkComparisonSummary}" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,8" />
+                <Border Background="{StaticResource BgSecondaryBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,12"
+                        AutomationProperties.Name="Benchmark condition match panel">
+                  <StackPanel>
+                    <TextBlock Text="Condition match" FontWeight="SemiBold" Margin="0,0,0,4" />
+                    <TextBlock Text="{Binding ConditionMatchOverallText}" Margin="0,0,0,4" />
+                    <TextBlock Text="{Binding ComparisonReliabilityText}" TextWrapping="Wrap" FontSize="12"
+                               Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" />
+                    <TextBlock Text="{Binding BenchmarkConditionWarningsSummary}" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Foreground="{StaticResource WarningBrush}" />
+                    <ItemsControl ItemsSource="{Binding BenchmarkConditionFields}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="2*" />
+                              <ColumnDefinition Width="*" />
+                              <ColumnDefinition Width="3*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding DisplayName}" />
+                            <TextBlock Grid.Column="1" Text="{Binding Status}" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="2" Text="{Binding Message}" TextWrapping="Wrap" FontSize="11"
+                                       Foreground="{StaticResource TextSecondaryBrush}" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <WrapPanel Margin="0,8,0,0">
+                      <Button Content="Compare anyway" Style="{StaticResource NavButtonStyle}" Padding="8,4" Margin="0,0,8,4"
+                              Command="{Binding ForceCompareBenchmarksCommand}"
+                              ToolTip="Requires confirmation on SevereMismatch. Still states comparison was forced. Not a valid performance proof."
+                              AutomationProperties.Name="Force compare despite severe mismatch" />
+                      <Button Content="Export Condition Report" Style="{StaticResource NavButtonStyle}" Padding="8,4" Margin="0,0,8,4"
+                              Command="{Binding ExportConditionReportCommand}"
+                              ToolTip="Export .frameforge-condition-report.json (local, no PII)."
+                              AutomationProperties.Name="Export condition report" />
+                    </WrapPanel>
+                  </StackPanel>
+                </Border>
+                <Grid Margin="0,0,0,6">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Text="Metric" FontWeight="SemiBold" />
+                  <TextBlock Grid.Column="1" Text="Before" FontWeight="SemiBold" />
+                  <TextBlock Grid.Column="2" Text="After" FontWeight="SemiBold" />
+                  <TextBlock Grid.Column="3" Text="Delta" FontWeight="SemiBold" />
+                  <TextBlock Grid.Column="4" Text="Interpretation" FontWeight="SemiBold" />
+                </Grid>
+                <ItemsControl ItemsSource="{Binding BenchmarkComparisonDisplayRows}"
+                              AutomationProperties.Name="Benchmark comparison table">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="2*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding Metric}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="1" Text="{Binding BeforeText}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="2" Text="{Binding AfterText}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="3" Text="{Binding DeltaText}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="4" Text="{Binding Interpretation}" TextWrapping="Wrap" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,8,0,0"
+                           Text="Unavailable metrics show Unavailable — never zero. Reliability is a heuristic, not statistical confidence. GPU utilization remains Unavailable (no PDH in this build)." />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- Guided Optimize & Benchmark -->
+        <ScrollViewer Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Guided}">
+          <StackPanel>
+            <TextBlock Text="Optimize &amp; Benchmark" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,12"
+                       Text="Guided flow: baseline benchmark → preview → your confirmation → backup → apply (profile or custom selection) → verify → post benchmark → compare → keep or restore. No FPS guarantees. Custom selections come from the Custom Optimization page. CS2 should already be running for benchmarks." />
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Selection</TextBlock>
+                <TextBlock Margin="0,0,0,4">
+                  <Run Text="Profile:" />
+                  <Run Text="{Binding SelectedProfile.Name, Mode=OneWay, FallbackValue=—}" FontWeight="SemiBold" />
+                </TextBlock>
+                <TextBlock Text="{Binding SelectedProfile.Description, Mode=OneWay, FallbackValue=}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" />
+                <TextBlock Margin="0,0,0,4">
+                  <Run Text="Benchmark:" />
+                  <Run Text="{Binding BenchmarkDurationSeconds, Mode=OneWay}" />
+                  <Run Text="s · interval" />
+                  <Run Text="{Binding BenchmarkSampleIntervalMs, Mode=OneWay}" />
+                  <Run Text="ms · warm-up" />
+                  <Run Text="{Binding BenchmarkWarmupSeconds, Mode=OneWay}" />
+                  <Run Text="s (same for before/after)" />
+                </TextBlock>
+                <TextBlock Margin="0,0,0,8">
+                  <Run Text="Status:" />
+                  <Run Text="{Binding GuidedStatusText, Mode=OneWay}" FontWeight="SemiBold" />
+                  <Run Text="·" />
+                  <Run Text="{Binding GuidedProgressPercent, Mode=OneWay, StringFormat={}{0:0} %}" />
+                </TextBlock>
+                <TextBlock Text="{Binding GuidedProgressMessage}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <WrapPanel>
+                  <Button Content="Preview Only" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding PreviewGuidedCommand}" Margin="0,0,8,8"
+                          AutomationProperties.Name="Preview guided optimization" />
+                  <Button Content="Run Guided Optimization" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding StartGuidedCommand}" Margin="0,0,8,8"
+                          AutomationProperties.Name="Run guided optimization" />
+                  <Button Content="Confirm Apply" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ConfirmGuidedCommand}" Margin="0,0,8,8"
+                          AutomationProperties.Name="Confirm apply settings" />
+                  <Button Content="Cancel" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CancelGuidedCommand}" Margin="0,0,8,8" IsCancel="True"
+                          AutomationProperties.Name="Cancel guided run" />
+                  <Button Content="Keep Changes" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding KeepGuidedCommand}" Margin="0,0,8,8"
+                          AutomationProperties.Name="Keep applied changes" />
+                  <Button Content="Restore Previous" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RestoreGuidedCommand}" Margin="0,0,8,8"
+                          AutomationProperties.Name="Restore previous configuration" />
+                </WrapPanel>
+
+                <!-- Phase 12 integrity gate -->
+                <Border Background="{StaticResource BgSecondaryBrush}" CornerRadius="8" Padding="12" Margin="0,8,0,8"
+                        Visibility="{Binding IsGuidedAwaitingConditionDecision, Converter={StaticResource BoolToVisibilityConverter}}"
+                        AutomationProperties.Name="Guided condition integrity gate">
+                  <StackPanel>
+                    <TextBlock Text="Severe condition mismatch" FontWeight="SemiBold" Margin="0,0,0,6"
+                               Foreground="{StaticResource WarningBrush}" />
+                    <TextBlock Text="{Binding GuidedConditionGateMessage}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                    <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Text="A forced comparison does not become a valid performance proof. Classification stays Inconclusive." />
+                    <WrapPanel>
+                      <Button Content="Stop / Restore" Style="{StaticResource PrimaryButtonStyle}"
+                              Command="{Binding StopGuidedConditionCommand}" Margin="0,0,8,4"
+                              IsDefault="True" IsCancel="True"
+                              ToolTip="Safest default. Restores previous configuration and stops the guided run."
+                              AutomationProperties.Name="Stop and restore after condition mismatch"
+                              AutomationProperties.HelpText="Default focus. Escape also selects Stop/Restore." />
+                      <Button Content="Continue Comparison" Style="{StaticResource NavButtonStyle}" Padding="12,8"
+                              Command="{Binding ContinueGuidedComparisonCommand}" Margin="0,0,8,4"
+                              ToolTip="Proceed with comparison. Result remains Inconclusive for performance claims."
+                              AutomationProperties.Name="Continue comparison despite mismatch" />
+                    </WrapPanel>
+                  </StackPanel>
+                </Border>
+
+                <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" TextWrapping="Wrap"
+                           Text="Confirm Apply is required after the baseline and diff. On severe mismatch the run pauses at the integrity gate (Stop/Restore default). Keep/Restore appear after comparison. Forced comparison is not a valid performance proof." />
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Progress log</TextBlock>
+                <ItemsControl ItemsSource="{Binding GuidedProgressLines}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="12" Margin="0,2" Foreground="{StaticResource TextSecondaryBrush}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Last guided summary</TextBlock>
+                <TextBlock Text="{Binding LastGuidedSummary}" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12"
+                    Visibility="{Binding HasGuidedComparison, Converter={StaticResource BoolToVisibilityConverter}}">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Comparison (measured metrics only)</TextBlock>
+                <ItemsControl ItemsSource="{Binding GuidedComparisonRows}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="2*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="2*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding Metric}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="1" Text="{Binding Before, StringFormat={}{0:0.##}}" />
+                        <TextBlock Grid.Column="2" Text="{Binding After, StringFormat={}{0:0.##}}" />
+                        <TextBlock Grid.Column="3" Text="{Binding AbsoluteDifference, StringFormat={}{0:+0.##;-0.##;0}}" />
+                        <TextBlock Grid.Column="4" Text="{Binding Interpretation}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}">
+              <StackPanel>
+                <DockPanel Margin="0,0,0,8">
+                  <TextBlock Text="Guided history" FontWeight="SemiBold" />
+                  <Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshGuidedHistoryCommand}" Style="{StaticResource NavButtonStyle}" Padding="8,4" />
+                </DockPanel>
+                <ListBox ItemsSource="{Binding GuidedHistory}" SelectedItem="{Binding SelectedGuidedRun}"
+                         Background="Transparent" BorderThickness="0" MaxHeight="200">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,6" Padding="10">
+                        <StackPanel>
+                          <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" />
+                          <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12">
+                            <Run Text="{Binding Classification, Mode=OneWay}" />
+                            <Run Text="·" />
+                            <Run Text="{Binding UserDecision, Mode=OneWay}" />
+                            <Run Text="· baseline" />
+                            <Run Text="{Binding InitialBenchmarkId, Mode=OneWay}" />
+                          </TextBlock>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- Custom Optimization (Phase 6) -->
+        <ScrollViewer Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Custom}">
+          <StackPanel>
+            <TextBlock Text="Custom Optimization" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,12"
+                       Text="Select individual CS2 settings or a custom combination. Recommended values are configuration suggestions — not measured performance gains. Apply uses the same validation → diff → backup → apply → verify path. Guided test reuses Phase 5 orchestration." />
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Search &amp; filter (in-memory)</TextBlock>
+                <Grid Margin="0,0,0,8">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <TextBox Grid.Column="0" Text="{Binding CustomSearchText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" Padding="6" />
+                  <ComboBox Grid.Column="1" ItemsSource="{Binding CustomCategoryFilterOptions}" SelectedItem="{Binding CustomCategoryFilter}" Margin="0,0,8,0" />
+                  <ComboBox Grid.Column="2" ItemsSource="{Binding CustomRiskFilterOptions}" SelectedItem="{Binding CustomRiskFilter}" />
+                </Grid>
+                <WrapPanel Margin="0,0,0,8">
+                  <CheckBox Content="Only changed from current" IsChecked="{Binding CustomOnlyChanged}" Margin="0,0,16,4" VerticalAlignment="Center" />
+                  <CheckBox Content="Only differ from recommended" IsChecked="{Binding CustomOnlyRecommendedDiff}" Margin="0,0,16,4" VerticalAlignment="Center" />
+                  <Button Content="Refresh catalog" Style="{StaticResource NavButtonStyle}" Command="{Binding RefreshCustomCatalogCommand}" Margin="0,0,8,4" Padding="8,4" />
+                  <Button Content="Select visible" Style="{StaticResource NavButtonStyle}" Command="{Binding SelectAllVisibleCustomCommand}" Margin="0,0,8,4" Padding="8,4" />
+                  <Button Content="Clear selection" Style="{StaticResource NavButtonStyle}" Command="{Binding ClearCustomSelectionCommand}" Margin="0,0,8,4" Padding="8,4" />
+                  <Button Content="Use recommended values" Style="{StaticResource NavButtonStyle}" Command="{Binding ApplyRecommendedToSelectionCommand}" Margin="0,0,8,4" Padding="8,4" />
+                </WrapPanel>
+                <TextBlock Text="{Binding CustomSelectionSummary}" FontWeight="SemiBold" />
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Catalog</TextBlock>
+                <ItemsControl ItemsSource="{Binding CustomOptimizationRows}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,8" Padding="10">
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="140" />
+                          </Grid.ColumnDefinitions>
+                          <CheckBox Grid.Column="0" IsChecked="{Binding IsSelected}" VerticalAlignment="Top" Margin="0,4,10,0" />
+                          <StackPanel Grid.Column="1">
+                            <TextBlock FontWeight="SemiBold">
+                              <Run Text="{Binding Name}" />
+                              <Run Text=" (" Foreground="{StaticResource TextSecondaryBrush}" />
+                              <Run Text="{Binding ConfigKey}" Foreground="{StaticResource TextSecondaryBrush}" />
+                              <Run Text=")" Foreground="{StaticResource TextSecondaryBrush}" />
+                            </TextBlock>
+                            <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,2,0,4" />
+                            <TextBlock FontSize="12" Margin="0,0,0,2">
+                              <Run Text="Category:" />
+                              <Run Text="{Binding CategoryLabel}" />
+                              <Run Text=" · Risk:" />
+                              <Run Text="{Binding RiskLabel}" />
+                              <Run Text=" · Expected impact:" />
+                              <Run Text="{Binding ExpectedImpactLabel}" />
+                              <Run Text=" (qualitative)" />
+                            </TextBlock>
+                            <TextBlock Text="{Binding ExpectedImpactDescription}" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                            <TextBlock FontSize="12">
+                              <Run Text="Current:" FontWeight="SemiBold" />
+                              <Run Text="{Binding CurrentValue}" />
+                              <Run Text="   Recommended:" FontWeight="SemiBold" />
+                              <Run Text="{Binding RecommendedValue}" />
+                            </TextBlock>
+                            <DockPanel Margin="0,6,0,0">
+                              <TextBlock Text="Target value:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                              <TextBox Text="{Binding PendingValue, UpdateSourceTrigger=PropertyChanged}" Padding="4" MinWidth="120" />
+                            </DockPanel>
+                            <TextBlock Text="{Binding DistinctionHint}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding IntelligenceHint}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
+                          </StackPanel>
+                          <StackPanel Grid.Column="2" Margin="8,0,0,0">
+                            <TextBlock Text="Measured (local):" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" />
+                            <TextBlock FontSize="12" TextWrapping="Wrap">
+                              <Run Text="Latest:" />
+                              <Run Text="{Binding LatestResultDisplay, FallbackValue=—}" FontWeight="SemiBold" />
+                            </TextBlock>
+                            <TextBlock FontSize="11" TextWrapping="Wrap">
+                              <Run Text="Tests:" />
+                              <Run Text="{Binding TestCountDisplay, FallbackValue=—}" />
+                            </TextBlock>
+                            <TextBlock FontSize="11" TextWrapping="Wrap">
+                              <Run Text="Confidence:" />
+                              <Run Text="{Binding ConfidenceDisplay, FallbackValue=—}" />
+                            </TextBlock>
+                            <TextBlock FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}">
+                              <Run Text="Last:" />
+                              <Run Text="{Binding LastTestedDisplay, FallbackValue=—}" />
+                            </TextBlock>
+                          </StackPanel>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Actions</TextBlock>
+                <WrapPanel>
+                  <Button Content="Preview selection" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding PreviewCustomSelectionCommand}" Margin="0,0,8,8" />
+                  <Button Content="Guided test selection" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding GuidedCustomSelectionCommand}" Margin="0,0,8,8" />
+                  <Button Content="Quick test (1 setting)" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding QuickTestSingleSettingCommand}" Margin="0,0,8,8" />
+                  <Button Content="Reset via backup" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ResetSelectedSettingViaBackupCommand}" Margin="0,0,8,8" />
+                  <Button Content="Assess targeted restore" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding EvaluateTargetedRestoreCommand}" Margin="0,0,8,8" />
+                  <Button Content="Restore Setting" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RestoreSettingCommand}" Margin="0,0,8,8" />
+                  <Button Content="Retest this setting" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RetestSettingCommand}" Margin="0,0,8,8" />
+                </WrapPanel>
+                <TextBlock Text="{Binding TargetedRestoreHint}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,4" />
+                <DockPanel Margin="0,0,0,8">
+                  <TextBlock Text="Retest target:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                  <ComboBox Width="160" ItemsSource="{Binding RetestTargetOptions}" SelectedItem="{Binding RetestTargetKind}" Margin="0,0,8,0" />
+                  <TextBox Text="{Binding RetestCustomValue, UpdateSourceTrigger=PropertyChanged}" Padding="4" ToolTip="Used when target is Custom Value" />
+                </DockPanel>
+                <TextBlock Text="{Binding CustomResetExplanation}" TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" />
+                <TextBlock FontWeight="SemiBold" Margin="0,4,0,4">Based on your tests</TextBlock>
+                <TextBlock Text="{Binding GlobalRecommendationBlurb}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <TextBlock Text="{Binding PerformanceIntelStatus}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <Button Content="Assess targeted restore (no execute)" Style="{StaticResource NavButtonStyle}" Command="{Binding EvaluateTargetedRestoreCommand}" Margin="0,0,8,8" Padding="8,4" />
+                <TextBlock Text="{Binding TargetedRestoreAssessmentText}" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" />
+                <DockPanel Margin="0,0,0,8">
+                  <TextBlock Text="Set name:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                  <Button DockPanel.Dock="Right" Content="Save selection as set" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveCustomSetCommand}" Margin="8,0,0,0" />
+                  <Button DockPanel.Dock="Right" Content="Save as Profile" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveSelectionAsProfileCommand}" Margin="8,0,0,0" />
+                  <TextBox Text="{Binding NewCustomSetName, UpdateSourceTrigger=PropertyChanged}" Padding="6" />
+                </DockPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Saved custom sets (not profiles)</TextBlock>
+                <ListBox ItemsSource="{Binding CustomOptimizationSets}" SelectedItem="{Binding SelectedCustomSet}"
+                         Background="Transparent" BorderThickness="0" MaxHeight="180" Margin="0,0,0,8">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,6" Padding="10">
+                        <StackPanel>
+                          <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" />
+                          <TextBlock Text="{Binding Description}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" TextWrapping="Wrap" />
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+                <WrapPanel>
+                  <Button Content="Load set" Style="{StaticResource NavButtonStyle}" Command="{Binding LoadCustomSetCommand}" Margin="0,0,8,4" Padding="8,4" />
+                  <Button Content="Duplicate" Style="{StaticResource NavButtonStyle}" Command="{Binding DuplicateCustomSetCommand}" Margin="0,0,8,4" Padding="8,4" />
+                  <Button Content="Rename" Style="{StaticResource NavButtonStyle}" Command="{Binding RenameCustomSetCommand}" Margin="0,0,8,4" Padding="8,4" />
+                  <Button Content="Delete" Style="{StaticResource NavButtonStyle}" Command="{Binding DeleteCustomSetCommand}" Margin="0,0,8,4" Padding="8,4" />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- Performance History (Phase 7) -->
+        <ScrollViewer Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Performance}">
+          <StackPanel>
+            <TextBlock Text="Performance History" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,12"
+                       Text="Local intelligence from your guided benchmark history only. No telemetry upload. Single-setting evidence is stronger than multi-setting. Confidence is heuristic — not statistical proof. No FPS guarantees." />
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,4">System fingerprint (non-sensitive)</TextBlock>
+                <TextBlock Text="{Binding PerformanceFingerprintSummary}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <TextBlock Text="{Binding PerformanceIntelStatus}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <TextBlock Text="{Binding GlobalRecommendationBlurb}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <CheckBox Content="Show all systems (legacy — prefer System filter below)" IsChecked="{Binding ShowAllSystemFingerprints}" Margin="0,0,0,8"
+                          AutomationProperties.Name="Show all system fingerprints" />
+                <Button Content="Rebuild intelligence cache" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RefreshPerformanceIntelCommand}" HorizontalAlignment="Left" Margin="0,0,0,8"
+                        ToolTip="Rebuild local index from guided runs (and validated imports). Quarantines corrupt index files."
+                        AutomationProperties.Name="Rebuild performance intelligence cache" />
+                <WrapPanel Margin="0,0,0,8">
+                  <Button Content="Export intelligence" Style="{StaticResource NavButtonStyle}" Command="{Binding ExportIntelligenceCommand}" Margin="0,0,8,4" Padding="8,4"
+                          ToolTip="Export .frameforge-intelligence.json (no PII)."
+                          AutomationProperties.Name="Export intelligence" />
+                  <Button Content="Export snapshots" Style="{StaticResource NavButtonStyle}" Command="{Binding ExportSnapshotsCommand}" Margin="0,0,8,4" Padding="8,4"
+                          ToolTip="Export .frameforge-snapshots.json setting change log."
+                          AutomationProperties.Name="Export setting snapshots" />
+                  <Button Content="Import package…" Style="{StaticResource NavButtonStyle}" Command="{Binding ImportIntelligenceCommand}" Margin="0,0,8,4" Padding="8,4"
+                          ToolTip="Opens import preview panel. Default action is Cancel — nothing is written until you confirm."
+                          AutomationProperties.Name="Import intelligence package" />
+                </WrapPanel>
+
+                <!-- Import preview panel (validation only until confirm) -->
+                <Border Background="{StaticResource BgSecondaryBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,12"
+                        Visibility="{Binding IsImportPreviewVisible, Converter={StaticResource BoolToVisibilityConverter}}"
+                        AutomationProperties.Name="Import preview panel">
+                  <StackPanel>
+                    <TextBlock Text="Import preview (no writes yet)" FontWeight="SemiBold" Margin="0,0,0,6" />
+                    <TextBlock Text="{Binding ImportPreview.SourcePath}" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4" />
+                    <TextBlock Text="{Binding ImportPreview.PackageKind}" Margin="0,0,0,4" />
+                    <TextBlock Text="{Binding ImportPreview.SummaryText}" TextWrapping="Wrap" Margin="0,0,0,6" />
+                    <TextBlock Text="{Binding ImportPreview.Message}" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="{StaticResource TextSecondaryBrush}" />
+                    <ItemsControl ItemsSource="{Binding ImportPreviewLines}" Margin="0,0,0,8">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <TextBlock Text="{Binding}" FontSize="12" TextWrapping="Wrap" Margin="0,2" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <WrapPanel>
+                      <Button Content="Cancel (safest)" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding CancelImportPreviewCommand}" Margin="0,0,8,4"
+                              IsDefault="True" IsCancel="True"
+                              ToolTip="Closes preview without writing. Default / safest action."
+                              AutomationProperties.Name="Cancel import preview" AutomationProperties.HelpText="Default safest action — no files written." />
+                      <Button Content="Confirm merge" Style="{StaticResource NavButtonStyle}" Command="{Binding ConfirmImportMergeCommand}" Margin="0,0,8,4" Padding="8,4"
+                              ToolTip="Merge after explicit confirm. Fingerprints stay separate."
+                              AutomationProperties.Name="Confirm import merge" />
+                      <Button Content="Import as new" Style="{StaticResource NavButtonStyle}" Command="{Binding ConfirmImportAsNewCommand}" Margin="0,0,8,4" Padding="8,4"
+                              ToolTip="Import as new history entries after explicit confirm."
+                              AutomationProperties.Name="Confirm import as new history" />
+                    </WrapPanel>
+                  </StackPanel>
+                </Border>
+
+                <Grid Margin="0,0,0,8">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Margin="0,0,8,0">
+                    <TextBlock Text="System (default: Current)" Margin="0,0,0,4" />
+                    <ComboBox ItemsSource="{Binding PerformanceSystemFilterOptions}" SelectedItem="{Binding PerformanceSystemFilter}"
+                              AutomationProperties.Name="Filter by system fingerprint" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Margin="0,0,8,0">
+                    <TextBlock Text="Condition reliability" Margin="0,0,0,4" />
+                    <ComboBox ItemsSource="{Binding PerformanceReliabilityFilterOptions}" SelectedItem="{Binding PerformanceReliabilityFilter}"
+                              AutomationProperties.Name="Filter by condition reliability" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="2" Margin="0,0,8,0">
+                    <TextBlock Text="Condition status" Margin="0,0,0,4" />
+                    <ComboBox ItemsSource="{Binding PerformanceConditionStatusFilterOptions}" SelectedItem="{Binding PerformanceConditionStatusFilter}"
+                              AutomationProperties.Name="Filter by condition match status" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="3">
+                    <TextBlock Text="Sort" Margin="0,0,0,4" />
+                    <ComboBox ItemsSource="{Binding PerformanceSortOptions}" SelectedItem="{Binding PerformanceSortKind}"
+                              AutomationProperties.Name="Sort performance records" />
+                  </StackPanel>
+                </Grid>
+                <Grid Margin="0,0,0,8">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Margin="0,0,8,0">
+                    <TextBlock Text="Classification" Margin="0,0,0,4" />
+                    <ComboBox ItemsSource="{Binding PerformanceClassificationFilterOptions}" SelectedItem="{Binding PerformanceClassificationFilter}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Margin="0,0,8,0">
+                    <TextBlock Text="Confidence" Margin="0,0,0,4" />
+                    <ComboBox ItemsSource="{Binding PerformanceConfidenceFilterOptions}" SelectedItem="{Binding PerformanceConfidenceFilter}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="2" Margin="0,0,8,0">
+                    <TextBlock Text="Setting" Margin="0,0,0,4" />
+                    <TextBox Text="{Binding PerformanceSettingFilter, UpdateSourceTrigger=PropertyChanged}" Padding="6"
+                             AutomationProperties.Name="Filter by setting name or key" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="3">
+                    <TextBlock Text="Profile / fingerprint" Margin="0,0,0,4" />
+                    <TextBox Text="{Binding PerformanceProfileFilter, UpdateSourceTrigger=PropertyChanged}" Padding="4" Margin="0,0,0,4"
+                             ToolTip="Profile name filter" />
+                    <TextBox Text="{Binding PerformanceFingerprintFilter, UpdateSourceTrigger=PropertyChanged}" Padding="4"
+                             ToolTip="Fingerprint id substring" AutomationProperties.Name="Filter by fingerprint id" />
+                  </StackPanel>
+                </Grid>
+                <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8"
+                           Text="Filters apply in memory to the cached index (no disk rescan, no re-benchmark). Condition reliability ≠ statistical confidence. Different system rows are labeled clearly." />
+
+                <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12"
+                        Visibility="{Binding HasHistoryReliabilityRows, Converter={StaticResource BoolToVisibilityConverter}}">
+                  <StackPanel>
+                    <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">History (reliability view)</TextBlock>
+                    <Grid Margin="0,0,0,4">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.2*" />
+                        <ColumnDefinition Width="1.4*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="0.8*" />
+                        <ColumnDefinition Width="0.9*" />
+                        <ColumnDefinition Width="0.8*" />
+                        <ColumnDefinition Width="0.7*" />
+                      </Grid.ColumnDefinitions>
+                      <TextBlock Text="Date" FontWeight="SemiBold" FontSize="11" />
+                      <TextBlock Grid.Column="1" Text="Setting / profile" FontWeight="SemiBold" FontSize="11" />
+                      <TextBlock Grid.Column="2" Text="System" FontWeight="SemiBold" FontSize="11" />
+                      <TextBlock Grid.Column="3" Text="Reliability" FontWeight="SemiBold" FontSize="11" />
+                      <TextBlock Grid.Column="4" Text="Condition" FontWeight="SemiBold" FontSize="11" />
+                      <TextBlock Grid.Column="5" Text="Class" FontWeight="SemiBold" FontSize="11" />
+                      <TextBlock Grid.Column="6" Text="Conf." FontWeight="SemiBold" FontSize="11" />
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding HistoryReliabilityRows}" MaxHeight="220"
+                                  AutomationProperties.Name="Performance history reliability rows">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="1.2*" />
+                              <ColumnDefinition Width="1.4*" />
+                              <ColumnDefinition Width="*" />
+                              <ColumnDefinition Width="0.8*" />
+                              <ColumnDefinition Width="0.9*" />
+                              <ColumnDefinition Width="0.8*" />
+                              <ColumnDefinition Width="0.7*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding DisplayDate}" FontSize="11" />
+                            <TextBlock Grid.Column="1" Text="{Binding SettingOrProfile}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="2" Text="{Binding DisplaySystem}" FontSize="11" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="3" Text="{Binding DisplayReliability}" FontSize="11" />
+                            <TextBlock Grid.Column="4" Text="{Binding DisplayCondition}" FontSize="11" />
+                            <TextBlock Grid.Column="5" Text="{Binding Classification}" FontSize="11" />
+                            <TextBlock Grid.Column="6" Text="{Binding Confidence}" FontSize="11" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
+                <WrapPanel>
+                  <Button Content="Assess restore" Style="{StaticResource NavButtonStyle}" Command="{Binding EvaluateTargetedRestoreCommand}" Margin="0,0,8,4" Padding="8,4"
+                          ToolTip="Re-read managed cfg and latest snapshot before any write." />
+                  <Button Content="Restore Setting" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RestoreSettingCommand}" Margin="0,0,8,4"
+                          ToolTip="{Binding TargetedRestoreHint}" />
+                  <Button Content="Retest this setting" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RetestSettingCommand}" Margin="0,0,8,4"
+                          ToolTip="Runs the existing guided Optimize &amp; Benchmark pipeline for one setting." />
+                </WrapPanel>
+                <TextBlock Text="{Binding TargetedRestoreAssessmentText}" FontSize="12" TextWrapping="Wrap" Margin="0,8,0,0" />
+                <TextBlock Text="{Binding TargetedRestoreHint}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                <DockPanel Margin="0,8,0,0">
+                  <TextBlock Text="Retest target:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                  <ComboBox Width="160" ItemsSource="{Binding RetestTargetOptions}" SelectedItem="{Binding RetestTargetKind}" Margin="0,0,8,0" />
+                  <TextBox Text="{Binding RetestCustomValue, UpdateSourceTrigger=PropertyChanged}" Padding="4" MinWidth="100" />
+                </DockPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Settings with local evidence</TextBlock>
+                <ListBox ItemsSource="{Binding PerformanceRecords}" SelectedItem="{Binding SelectedPerformanceRecord}"
+                         Background="Transparent" BorderThickness="0" MaxHeight="260">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,6" Padding="10">
+                        <StackPanel>
+                          <TextBlock FontWeight="SemiBold">
+                            <Run Text="{Binding SettingName}" />
+                            <Run Text=" (" Foreground="{StaticResource TextSecondaryBrush}" />
+                            <Run Text="{Binding SettingKey}" Foreground="{StaticResource TextSecondaryBrush}" />
+                            <Run Text=")" Foreground="{StaticResource TextSecondaryBrush}" />
+                          </TextBlock>
+                          <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}">
+                            <Run Text="{Binding FingerprintLabel}" FontWeight="SemiBold" />
+                            <Run Text=" · Latest:" />
+                            <Run Text="{Binding DisplayLatest}" />
+                            <Run Text=" · Confidence:" />
+                            <Run Text="{Binding DisplayConfidence}" />
+                            <Run Text=" · Direct:" />
+                            <Run Text="{Binding DirectTestCount}" />
+                            <Run Text=" · Multi:" />
+                            <Run Text="{Binding AssociatedMultiSettingTestCount}" />
+                          </TextBlock>
+                          <TextBlock Text="{Binding RecommendationSummary}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12"
+                    AutomationProperties.Name="Selected setting detail">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,4">Selected setting detail</TextBlock>
+                <TextBlock Text="{Binding SelectedPerformanceSummary}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <Grid Margin="0,0,0,8">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel>
+                    <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}">Current value (live)</TextBlock>
+                    <TextBlock Text="{Binding SettingDetail.DisplayCurrent}" FontWeight="SemiBold" />
+                    <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,6,0,0">Recommended</TextBlock>
+                    <TextBlock Text="{Binding SettingDetail.DisplayRecommended}" />
+                    <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,6,0,0">Last measured</TextBlock>
+                    <TextBlock Text="{Binding SettingDetail.LastMeasuredResult}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1">
+                    <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}">Confidence</TextBlock>
+                    <TextBlock Text="{Binding SettingDetail.Confidence}" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding SettingDetail.ConfidenceReason}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,6,0,0">Tests</TextBlock>
+                    <TextBlock>
+                      <Run Text="{Binding SettingDetail.TestCount}" />
+                      <Run Text=" total · direct " />
+                      <Run Text="{Binding SettingDetail.DirectTestCount}" />
+                      <Run Text=" · multi " />
+                      <Run Text="{Binding SettingDetail.AssociatedTestCount}" />
+                    </TextBlock>
+                    <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,6,0,0">Restore state</TextBlock>
+                    <TextBlock Text="{Binding SettingDetail.RestoreState}" TextWrapping="Wrap" />
+                    <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,6,0,0">Fingerprint</TextBlock>
+                    <TextBlock Text="{Binding SettingDetail.FingerprintLabel}" />
+                  </StackPanel>
+                </Grid>
+                <TextBlock Text="{Binding SettingDetail.RecommendationSummary}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8"
+                           Text="Recommendation (catalog) · Measurement (local evidence) · Restore (safety assessment) are separate." />
+                <WrapPanel Margin="0,0,0,8">
+                  <Button Content="Retest" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RetestSettingCommand}" Margin="0,0,8,4"
+                          AutomationProperties.Name="Retest selected setting" />
+                  <Button Content="Restore if safe" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RestoreSettingCommand}" Margin="0,0,8,4"
+                          ToolTip="{Binding TargetedRestoreHint}"
+                          AutomationProperties.Name="Restore selected setting if safe"
+                          AutomationProperties.HelpText="{Binding TargetedRestoreHint}" />
+                </WrapPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,4">Evidence (direct + associated)</TextBlock>
+                <ListBox ItemsSource="{Binding PerformanceEvidenceRows}" Background="Transparent" BorderThickness="0" MaxHeight="200"
+                         Name="EvidenceList">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,6" Padding="8">
+                        <StackPanel>
+                          <TextBlock FontSize="12">
+                            <Run Text="{Binding TestedAt, StringFormat={}{0:g}}" />
+                            <Run Text=" · " />
+                            <Run Text="{Binding EvidenceType}" FontWeight="SemiBold" />
+                            <Run Text=" · " />
+                            <Run Text="{Binding Classification}" />
+                            <Run Text=" · run " />
+                            <Run Text="{Binding GuidedRunId}" />
+                          </TextBlock>
+                          <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}">
+                            <Run Text="Benchmarks:" />
+                            <Run Text="{Binding InitialBenchmarkId}" />
+                            <Run Text=" → " />
+                            <Run Text="{Binding PostBenchmarkId}" />
+                            <Run Text=" · complete=" />
+                            <Run Text="{Binding BenchmarkComplete}" />
+                          </TextBlock>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Multi-run comparison (same setting)</TextBlock>
+                <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8"
+                           Text="Pick two evidence rows below (A then B), then compare. Values are raw recorded deltas — not smoothed or invented." />
+                <Grid Margin="0,0,0,8">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                    <TextBlock Text="Run A" FontWeight="SemiBold" />
+                    <ComboBox ItemsSource="{Binding PerformanceEvidenceRows}" SelectedItem="{Binding SelectedPerformanceEvidenceA}"
+                              DisplayMemberPath="GuidedRunId" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1">
+                    <TextBlock Text="Run B" FontWeight="SemiBold" />
+                    <ComboBox ItemsSource="{Binding PerformanceEvidenceRows}" SelectedItem="{Binding SelectedPerformanceEvidenceB}"
+                              DisplayMemberPath="GuidedRunId" />
+                  </StackPanel>
+                </Grid>
+                <Button Content="Compare A vs B" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ComparePerformanceEvidenceCommand}" HorizontalAlignment="Left" Margin="0,0,0,8" />
+                <ItemsControl ItemsSource="{Binding PerformanceCompareRows}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="2*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding Metric}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="1" Text="{Binding DeltaA, StringFormat={}{0:+0.##;-0.##;0}}" />
+                        <TextBlock Grid.Column="2" Text="{Binding ClassificationA}" />
+                        <TextBlock Grid.Column="3" Text="{Binding DeltaB, StringFormat={}{0:+0.##;-0.##;0}}" />
+                        <TextBlock Grid.Column="4" Text="{Binding ClassificationB}" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorderStyle}">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">Trend (direct tests · System CPU Δ when available)</TextBlock>
+                <ItemsControl ItemsSource="{Binding PerformanceTrendPoints}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <DockPanel Margin="0,2">
+                        <TextBlock DockPanel.Dock="Left" Width="120" Text="{Binding Label}" FontSize="11" />
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding Classification}" FontSize="11" Margin="8,0,0,0" />
+                        <TextBlock Text="{Binding Value, StringFormat={}{0:+0.0;-0.0;0} pp}" FontSize="12" />
+                      </DockPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- Settings -->
+        <ScrollViewer Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Settings}">
+          <StackPanel>
+            <TextBlock Text="Settings" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,16" />
+            <Border Style="{StaticResource CardBorderStyle}">
+              <StackPanel>
+                <CheckBox Content="Automatic backup before applying optimizations"
+                          IsChecked="{Binding Settings.AutomaticBackup}"
+                          Foreground="{StaticResource TextPrimaryBrush}"
+                          Margin="0,0,0,12" />
+                <CheckBox Content="Launch at Windows startup (registration not implemented yet)"
+                          IsChecked="{Binding Settings.LaunchAtStartup}"
+                          Foreground="{StaticResource TextPrimaryBrush}"
+                          Margin="0,0,0,12" />
+                <TextBlock Text="Logging level" Margin="0,0,0,4" />
+                <ComboBox SelectedItem="{Binding Settings.LoggingLevel}"
+                          ItemsSource="{Binding LoggingLevels}"
+                          Margin="0,0,0,12" />
+                <TextBlock Text="Theme" Margin="0,0,0,4" />
+                <ComboBox SelectedItem="{Binding Settings.Theme}"
+                          ItemsSource="{Binding Themes}"
+                          Margin="0,0,0,12" />
+                <TextBlock Text="Custom Steam path (optional)" Margin="0,0,0,4" />
+                <TextBox Text="{Binding Settings.CustomSteamPath, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,12" Padding="8" />
+                <TextBlock Text="Custom CS2 path (optional)" Margin="0,0,0,4" />
+                <TextBox Text="{Binding Settings.CustomCs2Path, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,16" Padding="8" />
+                <StackPanel Orientation="Horizontal">
+                  <Button Content="Save Settings" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveSettingsCommand}" Margin="0,0,8,0" />
+                  <Button Content="Reset Settings" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ResetSettingsCommand}" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </Grid>
+    </Grid>
+  </Grid>
+</Window>

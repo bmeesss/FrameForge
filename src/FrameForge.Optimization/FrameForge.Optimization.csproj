@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>FrameForge.Optimization</RootNamespace>
+    <AssemblyName>FrameForge.Optimization</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\FrameForge.Core\FrameForge.Core.csproj" />
+  </ItemGroup>
+</Project>

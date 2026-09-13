@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FrameForge.App is a Windows WPF front-end.
+    On non-Windows agents we emit a no-op stub project so `dotnet build` on the
+    solution succeeds without the Windows Desktop pack or nuget.org.
+    Build on Windows 10/11 for the real UI.
+  -->
+
+  <PropertyGroup Condition="'$(OS)' == 'Windows_NT' OR '$(ForceBuildWpf)' == 'true'">
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>FrameForge.App</RootNamespace>
+    <AssemblyName>FrameForge.App</AssemblyName>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(OS)' != 'Windows_NT' AND '$(ForceBuildWpf)' != 'true'">
+    <OutputType>Library</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>FrameForge.App</RootNamespace>
+    <AssemblyName>FrameForge.App</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <DefineConstants>$(DefineConstants);FRAMEFORGE_WPF_STUB</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT' OR '$(ForceBuildWpf)' == 'true'">
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\FrameForge.Core\FrameForge.Core.csproj" />
+    <ProjectReference Include="..\FrameForge.Infrastructure\FrameForge.Infrastructure.csproj" />
+    <ProjectReference Include="..\FrameForge.Hardware\FrameForge.Hardware.csproj" />
+    <ProjectReference Include="..\FrameForge.CS2\FrameForge.CS2.csproj" />
+    <ProjectReference Include="..\FrameForge.Optimization\FrameForge.Optimization.csproj" />
+    <ProjectReference Include="..\FrameForge.Benchmark\FrameForge.Benchmark.csproj" />
+    <None Include="..\..\assets\profiles\**\*.json" Link="Profiles\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(OS)' != 'Windows_NT' AND '$(ForceBuildWpf)' != 'true'">
+    <Compile Include="Stub\NonWindowsStub.cs" />
+    <ProjectReference Include="..\FrameForge.Core\FrameForge.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>FrameForge.Infrastructure</RootNamespace>
+    <AssemblyName>FrameForge.Infrastructure</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Use shared framework for DI / Logging / Hosting without external NuGet packages -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\FrameForge.Core\FrameForge.Core.csproj" />
+    <ProjectReference Include="..\FrameForge.Hardware\FrameForge.Hardware.csproj" />
+    <ProjectReference Include="..\FrameForge.CS2\FrameForge.CS2.csproj" />
+    <ProjectReference Include="..\FrameForge.Optimization\FrameForge.Optimization.csproj" />
+    <ProjectReference Include="..\FrameForge.Benchmark\FrameForge.Benchmark.csproj" />
+  </ItemGroup>
+</Project>

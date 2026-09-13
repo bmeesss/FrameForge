@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "quality",
+  "name": "Quality",
+  "description": "Favors smoother presentation and higher UI frame budget with a conservative fps_max.",
+  "isBuiltIn": true,
+  "isCustom": false,
+  "createdAt": "2026-01-01T00:00:00Z",
+  "updatedAt": "2026-01-01T00:00:00Z",
+  "settings": {
+    "fps_max": "200",
+    "fps_max_ui": "200",
+    "engine_low_latency_sleep_after_client_tick": "false",
+    "cl_hud_telemetry_frametime_show": "0",
+    "cl_hud_telemetry_ping_show": "0",
+    "cl_hud_telemetry_net_misdelivery_show": "0",
+    "cl_teamid_overhead_always": "0",
+    "cl_use_opens_buy_menu": "1",
+    "mm_dedicated_search_maxping": "150",
+    "m_rawinput": "1",
+    "m_customaccel": "0",
+    "snd_menumusic_volume": "0.5",
+    "volume": "1.0"
+  },
+  "recommendedOptimizationIds": [
+    "cs2.cfg.quality"
+  ],
+  "metadata": {
+    "audience": "quality"
+  }
+}

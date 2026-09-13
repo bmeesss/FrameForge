@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FrameForge.App/FrameForge.App.csproj" />
+    <Project Path="src/FrameForge.Benchmark/FrameForge.Benchmark.csproj" />
+    <Project Path="src/FrameForge.Core/FrameForge.Core.csproj" />
+    <Project Path="src/FrameForge.CS2/FrameForge.CS2.csproj" />
+    <Project Path="src/FrameForge.Hardware/FrameForge.Hardware.csproj" />
+    <Project Path="src/FrameForge.Infrastructure/FrameForge.Infrastructure.csproj" />
+    <Project Path="src/FrameForge.Optimization/FrameForge.Optimization.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FrameForge.Tests/FrameForge.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "balanced",
+  "name": "Balanced",
+  "description": "Balances visual comfort and performance with a moderate frame cap and essential telemetry.",
+  "isBuiltIn": true,
+  "isCustom": false,
+  "createdAt": "2026-01-01T00:00:00Z",
+  "updatedAt": "2026-01-01T00:00:00Z",
+  "settings": {
+    "fps_max": "400",
+    "fps_max_ui": "200",
+    "engine_low_latency_sleep_after_client_tick": "false",
+    "cl_hud_telemetry_frametime_show": "1",
+    "cl_hud_telemetry_ping_show": "1",
+    "cl_hud_telemetry_net_misdelivery_show": "0",
+    "cl_teamid_overhead_always": "0",
+    "cl_use_opens_buy_menu": "1",
+    "mm_dedicated_search_maxping": "120",
+    "m_rawinput": "1",
+    "m_customaccel": "0",
+    "snd_menumusic_volume": "0.3",
+    "volume": "0.8"
+  },
+  "recommendedOptimizationIds": [
+    "cs2.cfg.balanced",
+    "cs2.launch.options-hint"
+  ],
+  "metadata": {
+    "audience": "general"
+  }
+}
