@@ -1,0 +1,20 @@
+{
+  "id": "competitive",
+  "name": "Competitive",
+  "description": "Prioritizes responsiveness and clarity for competitive play.",
+  "isBuiltIn": true,
+  "isCustom": false,
+  "cs2Settings": {
+    "fps_max": "0",
+    "cl_hud_telemetry_frametime_show": "1",
+    "cl_hud_telemetry_ping_show": "1"
+  },
+  "recommendedOptimizationIds": [
+    "cs2.cfg.competitive-telemetry",
+    "cs2.launch.options-hint",
+    "sys.power.high-performance-recommend"
+  ],
+  "metadata": {
+    "audience": "competitive"
+  }
+}

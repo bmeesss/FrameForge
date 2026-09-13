@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>FrameForge.Tests</RootNamespace>
+    <AssemblyName>FrameForge.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\FrameForge.Core\FrameForge.Core.csproj" />
+    <ProjectReference Include="..\..\src\FrameForge.Hardware\FrameForge.Hardware.csproj" />
+    <ProjectReference Include="..\..\src\FrameForge.CS2\FrameForge.CS2.csproj" />
+    <ProjectReference Include="..\..\src\FrameForge.Optimization\FrameForge.Optimization.csproj" />
+    <ProjectReference Include="..\..\src\FrameForge.Benchmark\FrameForge.Benchmark.csproj" />
+    <ProjectReference Include="..\..\src\FrameForge.Infrastructure\FrameForge.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <!--
+    Offline-friendly test host:
+    This project ships a minimal xUnit-compatible runner (Fact/Theory/Assert)
+    so the suite runs without nuget.org. When nuget.org is available, you may
+    optionally add the real xunit packages and switch to `dotnet test`.
+  -->
+</Project>

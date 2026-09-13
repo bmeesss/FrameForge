@@ -1,0 +1,263 @@
+<Window x:Class="FrameForge.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:FrameForge.App.ViewModels"
+        Title="FrameForge — CS2 Performance Companion"
+        Height="720" Width="1100"
+        MinHeight="600" MinWidth="900"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource BgPrimaryBrush}">
+  <Grid>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="220" />
+      <ColumnDefinition Width="*" />
+    </Grid.ColumnDefinitions>
+
+    <!-- Sidebar -->
+    <Border Grid.Column="0" Background="{StaticResource BgSecondaryBrush}" Padding="16">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,24">
+          <TextBlock Text="FrameForge" FontSize="22" FontWeight="SemiBold" />
+          <TextBlock Text="Legitimate CS2 companion" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" />
+        </StackPanel>
+
+        <StackPanel DockPanel.Dock="Bottom">
+          <TextBlock Text="{Binding StatusMessage}"
+                     Foreground="{StaticResource TextSecondaryBrush}"
+                     TextWrapping="Wrap"
+                     FontSize="12"
+                     Margin="0,0,0,8" />
+          <Button Content="Refresh"
+                  Style="{StaticResource PrimaryButtonStyle}"
+                  Command="{Binding RefreshCommand}" />
+        </StackPanel>
+
+        <StackPanel>
+          <Button Content="Home" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Home" />
+          <Button Content="Optimize" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Optimize" />
+          <Button Content="CS2 Settings" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Cs2" />
+          <Button Content="Profiles" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Profiles" />
+          <Button Content="Backups" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Backups" />
+          <Button Content="Settings" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="Settings" />
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <!-- Content -->
+    <Grid Grid.Column="1" Margin="24">
+      <!-- Home -->
+      <ScrollViewer Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Home}">
+        <StackPanel>
+          <TextBlock Text="Dashboard" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,16" />
+          <UniformGrid Columns="2">
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,12,12">
+              <StackPanel>
+                <TextBlock Text="CS2 Status" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBlock Text="{Binding Dashboard.Cs2.DetectionMessage}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Dashboard.Cs2.InstallPath}" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,6,0,0" />
+              </StackPanel>
+            </Border>
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock Text="Optimization" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBlock Text="{Binding Dashboard.OptimizationStatus}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" />
+                <TextBlock Margin="0,6,0,0">
+                  <Run Text="Recommendations:" />
+                  <Run Text="{Binding Dashboard.AvailableRecommendationCount, Mode=OneWay}" />
+                </TextBlock>
+              </StackPanel>
+            </Border>
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,12,12">
+              <StackPanel>
+                <TextBlock Text="CPU" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBlock Text="{Binding Dashboard.Hardware.CpuName}" FontSize="16" FontWeight="SemiBold" Margin="0,6,0,0" TextWrapping="Wrap" />
+                <TextBlock Margin="0,6,0,0" Foreground="{StaticResource TextSecondaryBrush}">
+                  <Run Text="{Binding Dashboard.Hardware.CpuCoreCount, Mode=OneWay}" />
+                  <Run Text="cores /" />
+                  <Run Text="{Binding Dashboard.Hardware.CpuThreadCount, Mode=OneWay}" />
+                  <Run Text="threads" />
+                </TextBlock>
+              </StackPanel>
+            </Border>
+            <Border Style="{StaticResource CardBorderStyle}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock Text="GPU / RAM / OS" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBlock Text="{Binding Dashboard.Hardware.GpuName}" Margin="0,6,0,0" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Dashboard.Hardware.FormattedRam}" Margin="0,4,0,0" />
+                <TextBlock Text="{Binding Dashboard.Hardware.WindowsVersion}" Margin="0,4,0,0" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBlock Text="{Binding Dashboard.Hardware.Architecture}" Margin="0,4,0,0" Foreground="{StaticResource TextSecondaryBrush}" />
+              </StackPanel>
+            </Border>
+          </UniformGrid>
+          <Border Style="{StaticResource CardBorderStyle}">
+            <StackPanel>
+              <TextBlock Text="Active Profile" Foreground="{StaticResource TextSecondaryBrush}" />
+              <TextBlock Text="{Binding Dashboard.ActiveProfileName}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" />
+              <TextBlock Text="FrameForge never injects into CS2, edits memory, or bypasses anti-cheat."
+                         Foreground="{StaticResource TextSecondaryBrush}" Margin="0,12,0,0" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- Optimize -->
+      <Grid Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Optimize}">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock Text="Optimize" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,12" />
+        <ListBox Grid.Row="1" ItemsSource="{Binding Optimizations}" Background="Transparent" BorderThickness="0">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <Border Style="{StaticResource CardBorderStyle}">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Top" Margin="0,4,12,0" />
+                  <StackPanel Grid.Column="1">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="16" />
+                    <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" />
+                    <TextBlock Margin="0,8,0,0" Foreground="{StaticResource TextSecondaryBrush}">
+                      <Run Text="{Binding Category, Mode=OneWay}" />
+                      <Run Text="· Risk:" />
+                      <Run Text="{Binding Risk, Mode=OneWay}" />
+                      <Run Text="· Impact:" />
+                      <Run Text="{Binding Impact, Mode=OneWay}" />
+                      <Run Text="·" />
+                      <Run Text="{Binding StatusText, Mode=OneWay}" />
+                    </TextBlock>
+                  </StackPanel>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <Button Grid.Row="2" Content="Apply Selected (with backup)"
+                Style="{StaticResource PrimaryButtonStyle}"
+                HorizontalAlignment="Left"
+                Command="{Binding ApplySelectedOptimizationsCommand}"
+                Margin="0,12,0,0" />
+      </Grid>
+
+      <!-- CS2 Settings -->
+      <Grid Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Cs2}">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <TextBlock Text="CS2 Settings" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,12" />
+        <Border Grid.Row="1" Style="{StaticResource CardBorderStyle}">
+          <ScrollViewer>
+            <ItemsControl ItemsSource="{Binding Cs2ConfigLines}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding}" FontFamily="Consolas" Margin="0,2" TextWrapping="Wrap" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Border>
+      </Grid>
+
+      <!-- Profiles -->
+      <Grid Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Profiles}">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock Text="Profiles" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,12" />
+        <ListBox Grid.Row="1"
+                 ItemsSource="{Binding Profiles}"
+                 SelectedItem="{Binding SelectedProfile}"
+                 Background="Transparent" BorderThickness="0">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <Border Style="{StaticResource CardBorderStyle}">
+                <StackPanel>
+                  <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" />
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <Button Grid.Row="2" Content="Activate Profile"
+                Style="{StaticResource PrimaryButtonStyle}"
+                HorizontalAlignment="Left"
+                Command="{Binding ActivateProfileCommand}"
+                Margin="0,12,0,0" />
+      </Grid>
+
+      <!-- Backups -->
+      <Grid Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Backups}">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock Text="Backups" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,12" />
+        <ListBox Grid.Row="1"
+                 ItemsSource="{Binding Backups}"
+                 SelectedItem="{Binding SelectedBackup}"
+                 Background="Transparent" BorderThickness="0">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <Border Style="{StaticResource CardBorderStyle}">
+                <StackPanel>
+                  <TextBlock Text="{Binding Id}" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                  <TextBlock Text="{Binding Timestamp}" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" />
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <Button Grid.Row="2" Content="Restore Selected Backup"
+                Style="{StaticResource PrimaryButtonStyle}"
+                HorizontalAlignment="Left"
+                Command="{Binding RestoreBackupCommand}"
+                Margin="0,12,0,0" />
+      </Grid>
+
+      <!-- Settings -->
+      <ScrollViewer Visibility="{Binding CurrentPage, Converter={StaticResource PageVisibilityConverter}, ConverterParameter=Settings}">
+        <StackPanel>
+          <TextBlock Text="Settings" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,16" />
+          <Border Style="{StaticResource CardBorderStyle}">
+            <StackPanel>
+              <CheckBox Content="Automatic backup before applying optimizations"
+                        IsChecked="{Binding Settings.AutomaticBackup}"
+                        Foreground="{StaticResource TextPrimaryBrush}"
+                        Margin="0,0,0,12" />
+              <CheckBox Content="Launch at Windows startup (TODO: register on apply)"
+                        IsChecked="{Binding Settings.LaunchAtStartup}"
+                        Foreground="{StaticResource TextPrimaryBrush}"
+                        Margin="0,0,0,12" />
+              <TextBlock Text="Logging level" Margin="0,0,0,4" />
+              <ComboBox SelectedItem="{Binding Settings.LoggingLevel}"
+                        ItemsSource="{Binding LoggingLevels}"
+                        Margin="0,0,0,12" />
+              <TextBlock Text="Theme" Margin="0,0,0,4" />
+              <ComboBox SelectedItem="{Binding Settings.Theme}"
+                        ItemsSource="{Binding Themes}"
+                        Margin="0,0,0,12" />
+              <TextBlock Text="Custom Steam path (optional)" Margin="0,0,0,4" />
+              <TextBox Text="{Binding Settings.CustomSteamPath, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,12" Padding="8" />
+              <TextBlock Text="Custom CS2 path (optional)" Margin="0,0,0,4" />
+              <TextBox Text="{Binding Settings.CustomCs2Path, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,16" Padding="8" />
+              <StackPanel Orientation="Horizontal">
+                <Button Content="Save Settings" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding SaveSettingsCommand}" Margin="0,0,8,0" />
+                <Button Content="Reset Application Data" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ResetSettingsCommand}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+  </Grid>
+</Window>

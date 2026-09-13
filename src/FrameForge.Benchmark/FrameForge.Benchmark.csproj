@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>FrameForge.Benchmark</RootNamespace>
+    <AssemblyName>FrameForge.Benchmark</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\FrameForge.Core\FrameForge.Core.csproj" />
+    <ProjectReference Include="..\FrameForge.Hardware\FrameForge.Hardware.csproj" />
+  </ItemGroup>
+</Project>

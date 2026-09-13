@@ -1,0 +1,18 @@
+{
+  "id": "balanced",
+  "name": "Balanced",
+  "description": "Balanced mix of performance and visual comfort.",
+  "isBuiltIn": true,
+  "isCustom": false,
+  "cs2Settings": {
+    "fps_max": "400",
+    "cl_hud_telemetry_frametime_show": "1"
+  },
+  "recommendedOptimizationIds": [
+    "cs2.cfg.balanced",
+    "cs2.launch.options-hint"
+  ],
+  "metadata": {
+    "audience": "general"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "quality",
+  "name": "Quality",
+  "description": "Favors smoother presentation with a moderate frame cap.",
+  "isBuiltIn": true,
+  "isCustom": false,
+  "cs2Settings": {
+    "fps_max": "200",
+    "cl_hud_telemetry_frametime_show": "0"
+  },
+  "recommendedOptimizationIds": [
+    "cs2.cfg.quality"
+  ],
+  "metadata": {
+    "audience": "quality"
+  }
+}

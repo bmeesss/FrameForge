@@ -1,0 +1,39 @@
+## Build
+bin/
+obj/
+out/
+artifacts/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+.idea/
+*.DotSettings.user
+
+## NuGet
+.nuget/
+packages/*
+!packages/.gitkeep
+*.nupkg
+project.lock.json
+project.fragment.lock.json
+
+## Logs / local data
+*.log
+Logs/
+Backups/
+
+## OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+## Test / coverage
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+## Local SDK / tools (not part of repo)
+.dotnet/

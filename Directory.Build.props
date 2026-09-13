@@ -1,0 +1,17 @@
+<Project>
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Authors>FrameForge Contributors</Authors>
+    <Company>FrameForge</Company>
+    <Product>FrameForge</Product>
+    <Copyright>Copyright (c) FrameForge Contributors</Copyright>
+    <Description>Legitimate CS2 performance companion and optimizer. Contains no cheats.</Description>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <!-- Allow restoring without nuget.org when offline / firewalled -->
+    <RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources>
+  </PropertyGroup>
+</Project>
