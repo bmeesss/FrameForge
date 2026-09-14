@@ -1,0 +1,116 @@
+name: Build and Test
+
+on:
+  push:
+    branches:
+      - main
+      - "arena/**"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  # Informational only. The job passes or fails on the exit code of the test
+  # runner, never because this number matches.
+  EXPECTED_TESTS: "217"
+
+jobs:
+  verify:
+    name: Restore · Build · Test (Release)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET SDK (from global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: SDK version (dotnet --info)
+        run: |
+          echo "::group::dotnet --version"
+          dotnet --version
+          echo "::endgroup::"
+          echo "::group::dotnet --info"
+          dotnet --info
+          echo "::endgroup::"
+
+      - name: Restore
+        run: dotnet restore FrameForge.sln
+
+      - name: Build (Release)
+        run: dotnet build FrameForge.sln -c Release --no-restore
+
+      - name: Run tests (FrameForge offline test runner)
+        id: tests
+        run: |
+          set -o pipefail
+          dotnet run --project tests/FrameForge.Tests -c Release --no-build 2>&1 | tee test-output.txt
+
+      - name: Test summary
+        if: always()
+        run: |
+          set +e
+          SUMMARY_LINE=""
+          if [ -f test-output.txt ]; then
+            SUMMARY_LINE="$(grep -E '^Total: ' test-output.txt | tail -n 1)"
+          fi
+
+          {
+            echo "### Test results"
+            echo
+            echo '```'
+            if [ -n "$SUMMARY_LINE" ]; then
+              echo "$SUMMARY_LINE"
+            else
+              echo "(no 'Total:' line found — the test step did not produce a summary)"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "$SUMMARY_LINE" ]; then
+            echo "::error::No test summary was produced."
+            exit 1
+          fi
+
+          TOTAL="$(printf '%s' "$SUMMARY_LINE" | sed -E 's/^Total: ([0-9]+).*/\1/')"
+          PASSED="$(printf '%s' "$SUMMARY_LINE" | sed -E 's/.*Passed: ([0-9]+).*/\1/')"
+          FAILED="$(printf '%s' "$SUMMARY_LINE" | sed -E 's/.*Failed: ([0-9]+).*/\1/')"
+
+          echo "Tests: total=${TOTAL} passed=${PASSED} failed=${FAILED}"
+
+          if [ "$FAILED" != "0" ]; then
+            echo "::error::${FAILED} test(s) failed."
+          fi
+
+          if [ "$TOTAL" != "$EXPECTED_TESTS" ]; then
+            echo "::warning::Test count ${TOTAL} differs from the expected ${EXPECTED_TESTS} (informational only — the result is decided by test failures, not by the count)."
+          fi
+
+          if grep -q '^Failures:' test-output.txt; then
+            {
+              echo
+              echo "### Failures"
+              echo '```'
+              sed -n '/^Failures:/,$p' test-output.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          [ "$FAILED" = "0" ]
+
+      - name: Upload test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output
+          path: test-output.txt
+          if-no-files-found: ignore
