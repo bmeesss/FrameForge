@@ -230,6 +230,7 @@ public static class MiniTestHost
                     {
                         failed++;
                         output.WriteLine($"  FAIL  {name}");
+                        WriteAnnotation(output, name, tie.InnerException);
                         failures.AppendLine(name);
                         failures.AppendLine(tie.InnerException.ToString());
                         failures.AppendLine();
@@ -238,6 +239,7 @@ public static class MiniTestHost
                     {
                         failed++;
                         output.WriteLine($"  FAIL  {name}");
+                        WriteAnnotation(output, name, ex);
                         failures.AppendLine(name);
                         failures.AppendLine(ex.ToString());
                         failures.AppendLine();
@@ -248,6 +250,7 @@ public static class MiniTestHost
 
         output.WriteLine();
         output.WriteLine($"Total: {passed + failed + skipped}  Passed: {passed}  Failed: {failed}  Skipped: {skipped}");
+
         if (failed > 0)
         {
             output.WriteLine();
@@ -257,4 +260,26 @@ public static class MiniTestHost
 
         return failed == 0 ? 0 : 1;
     }
+
+    /// <summary>
+    /// Emits a GitHub Actions error annotation for a failing test. Annotations are readable
+    /// through the GitHub API, so a failing test is identifiable without downloading the
+    /// job log. Plain runners (dotnet run locally) simply see an extra line of output.
+    /// </summary>
+    private static void WriteAnnotation(TextWriter output, string testName, Exception exception)
+    {
+        var message = exception.Message.ReplaceLineEndings(" ").Trim();
+        if (message.Length > 400)
+        {
+            message = message[..400] + "...";
+        }
+
+        var type = exception.GetType().Name;
+        output.WriteLine("::error ::" + EscapeAnnotation($"{testName} [{type}]: {message}"));
+    }
+
+    private static string EscapeAnnotation(string value) =>
+        value.Replace("%", "%25", StringComparison.Ordinal)
+             .Replace("\r", "%0D", StringComparison.Ordinal)
+             .Replace("\n", "%0A", StringComparison.Ordinal);
 }
