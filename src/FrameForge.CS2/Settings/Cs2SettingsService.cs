@@ -466,6 +466,14 @@ public sealed class Cs2SettingsService : ICs2SettingsService
         // Anything failing between the recovery snapshot and the write block must not leak
         // the temporary snapshot: dispose it and rethrow.
         string? backupId = null;
+
+        // Per-key snapshots are prepared for every successful apply path (Phase 10), whether or
+        // not a user backup is created. Declared *outside* the backup-prep try block because the
+        // verified success path appends them further down; assigned *inside* the try so that a
+        // failure while building them still disposes the internal recovery snapshot instead of
+        // leaking it.
+        List<SettingChangeSnapshot> keySnaps;
+
         try
         {
             var appSettings = await _appSettings.LoadAsync(cancellationToken).ConfigureAwait(false);
@@ -476,7 +484,7 @@ public sealed class Cs2SettingsService : ICs2SettingsService
                 .ToDictionary(e => e.ConfigKey, e => e.CurrentValue, StringComparer.OrdinalIgnoreCase);
 
             // Always prepare per-key snapshots for every successful apply path (Phase 10).
-            var keySnaps = diff.Entries
+            keySnaps = diff.Entries
                 .Where(e => e.IsChange &&
                             !e.SettingId.Equals("integration.autoexec", StringComparison.OrdinalIgnoreCase))
                 .Select(e => new SettingChangeSnapshot

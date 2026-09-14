@@ -6,6 +6,7 @@ using FrameForge.CS2.Settings;
 using FrameForge.Infrastructure.Backup;
 using FrameForge.Infrastructure.Logging;
 using FrameForge.Infrastructure.Paths;
+using FrameForge.Infrastructure.Performance;
 using FrameForge.Infrastructure.Settings;
 using Xunit;
 
@@ -723,6 +724,121 @@ public sealed class ReliabilityHardeningTests
     }
 
     // -------------------------------------------------------------------------------------
+    // 5. Per-key change snapshots (Phase 10) — persisted on every *successful* apply
+    //
+    // Regression coverage for the per-key snapshot list that is built before the backup and
+    // appended after a verified success: it must exist independently of the optional user
+    // backup (the no-backup path is the one that reaches the append site), carry the previous
+    // and new value plus the managed file, and never be written for an apply that failed and
+    // was rolled back.
+    // -------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Apply_PersistsPerKeySnapshots_WhenNoBackupIsCreated()
+    {
+        await using var h = await Harness.CreateAsync(
+            automaticBackup: false,
+            autoexec: Cs2AutoexecIntegration.EnsureFrameForgeSection("// user" + Nl),
+            managed: "fps_max 400" + Nl);
+
+        var result = await h.Service.ApplySettingsAsync(
+            new Dictionary<string, string> { ["fps_max"] = "0" },
+            reason: "snapshot-without-backup");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Null(result.BackupId);
+        Assert.True(result.Recovery.SnapshotCreated);
+        Assert.True(result.Recovery.CleanedUp);
+
+        // Per-key snapshots are written whether or not a user backup was requested.
+        var snap = AssertSingle(await h.Snapshots.ListAsync());
+        Assert.Equal("fps_max", snap.ConfigKey);
+        Assert.Equal("400", snap.PreviousValue);
+        Assert.Equal("0", snap.NewValue);
+        Assert.Equal(h.ManagedPath, snap.File);
+        Assert.Equal("snapshot-without-backup", snap.Reason);
+        Assert.False(string.IsNullOrWhiteSpace(snap.Id));
+
+        // Nothing links the snapshot to a backup, because no backup was created.
+        Assert.Null(snap.BackupId);
+        Assert.Empty(await h.Backups.ListBackupsAsync());
+    }
+
+    [Fact]
+    public async Task Apply_PersistsPerKeySnapshots_AndStampsBackupId_WhenBackupIsCreated()
+    {
+        await using var h = await Harness.CreateAsync(
+            automaticBackup: true,
+            autoexec: Cs2AutoexecIntegration.EnsureFrameForgeSection("// user" + Nl),
+            managed: "fps_max 400" + Nl);
+
+        var result = await h.Service.ApplySettingsAsync(
+            new Dictionary<string, string> { ["fps_max"] = "144" },
+            reason: "snapshot-with-backup");
+
+        Assert.True(result.Success, result.Message);
+        Assert.NotNull(result.BackupId);
+
+        var snap = AssertSingle(await h.Snapshots.ListAsync());
+        Assert.Equal("fps_max", snap.ConfigKey);
+        Assert.Equal("400", snap.PreviousValue);
+        Assert.Equal("144", snap.NewValue);
+        Assert.Equal(result.BackupId, snap.BackupId);
+
+        // The same snapshots were handed to the backup that was created for this apply.
+        var backups = await h.Backups.ListBackupsAsync();
+        var backup = AssertSingle(backups);
+        Assert.Equal(result.BackupId, backup.Id);
+        Assert.Equal("fps_max", AssertSingle(backup.SettingChangeSnapshots).ConfigKey);
+    }
+
+    [Fact]
+    public async Task Apply_PersistsOneSnapshotPerChangedSetting()
+    {
+        await using var h = await Harness.CreateAsync(
+            automaticBackup: false,
+            autoexec: Cs2AutoexecIntegration.EnsureFrameForgeSection("// user" + Nl),
+            managed: "fps_max 400" + Nl + "m_rawinput 1" + Nl);
+
+        var result = await h.Service.ApplySettingsAsync(
+            new Dictionary<string, string> { ["fps_max"] = "0", ["m_rawinput"] = "0" },
+            reason: "multi-key");
+
+        Assert.True(result.Success, result.Message);
+
+        var snaps = await h.Snapshots.ListAsync();
+        Assert.Equal(2, snaps.Count);
+        Assert.Contains(snaps, s => s.ConfigKey == "fps_max" && s.PreviousValue == "400" && s.NewValue == "0");
+        Assert.Contains(snaps, s => s.ConfigKey == "m_rawinput" && s.PreviousValue == "1" && s.NewValue == "0");
+        Assert.All(snaps, s => Assert.Equal(h.ManagedPath, s.File));
+        Assert.All(snaps, s => Assert.Equal("multi-key", s.Reason));
+    }
+
+    [Fact]
+    public async Task Apply_FailedVerification_PersistsNoSnapshots()
+    {
+        await using var h = await Harness.CreateAsync(
+            automaticBackup: true,
+            autoexec: Cs2AutoexecIntegration.EnsureFrameForgeSection("// user" + Nl),
+            managed: "fps_max 400" + Nl);
+
+        // Corrupt the managed file silently after the write so verification must fail.
+        h.Config.AfterWriteValues = path => File.WriteAllText(path, "fps_max 999" + Nl);
+
+        var result = await h.Service.ApplySettingsAsync(
+            new Dictionary<string, string> { ["fps_max"] = "0" },
+            reason: "verify-failure-snapshot");
+
+        Assert.False(result.Success);
+        Assert.Contains("Verification failed", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.Recovery.RestoreAttempted);
+        Assert.True(result.Recovery.RestoreSucceeded);
+
+        // A rolled-back apply must not leave per-key snapshots behind.
+        Assert.Empty(await h.Snapshots.ListAsync());
+    }
+
+    // -------------------------------------------------------------------------------------
     // helpers
     // -------------------------------------------------------------------------------------
 
@@ -822,6 +938,7 @@ public sealed class ReliabilityHardeningTests
             Config = new HookedConfigService();
             Recovery = new CapturingRecoverySnapshots();
             Detection = new FakeDetection(cfgDir);
+            Snapshots = new SettingChangeSnapshotStore(paths, log);
 
             Service = new Cs2SettingsService(
                 new Cs2SettingCatalog(),
@@ -830,7 +947,7 @@ public sealed class ReliabilityHardeningTests
                 Backups,
                 AppSettings,
                 log,
-                changeSnapshots: null,
+                changeSnapshots: Snapshots,
                 baselineSink: null,
                 recoveryFactory: Recovery);
         }
@@ -850,6 +967,8 @@ public sealed class ReliabilityHardeningTests
         public CapturingRecoverySnapshots Recovery { get; }
 
         public HookedBackupService Backups { get; }
+
+        public SettingChangeSnapshotStore Snapshots { get; }
 
         public AppSettingsService AppSettings { get; }
 

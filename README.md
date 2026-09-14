@@ -500,6 +500,45 @@ dotnet run --project tests/FrameForge.Tests -c Release
 ./build.sh
 ```
 
+The suite uses the repository's own offline test runner (`tests/FrameForge.Tests/TestKit`),
+not `dotnet test`: the project intentionally ships no xunit/testhost package so it can
+run without nuget.org. It prints `Total: N  Passed: N  Failed: N  Skipped: N` and exits
+non-zero when a test fails.
+
+## Continuous integration (GitHub Actions)
+
+`.github/workflows/build.yml` performs the **real** verification of every push to `main`
+and to `arena/**`, and of every pull request targeting `main`:
+
+```bash
+dotnet restore FrameForge.sln
+dotnet build   FrameForge.sln -c Release --no-restore
+dotnet run --project tests/FrameForge.Tests -c Release --no-build
+```
+
+* Runner: `ubuntu-latest` (GitHub-hosted).
+* SDK: taken from `global.json` (`10.0.400`, `rollForward: latestFeature`) via
+  `actions/setup-dotnet` — CI never silently upgrades or downgrades it.
+* The job logs the SDK version (`dotnet --version`, `dotnet --info`) before restore, and
+  writes the test tally plus any failure details to the run's job summary. The test log is
+  uploaded as an artifact when the job fails.
+* A test failure fails the job (the runner's exit code decides, not the test count); an
+  unexpected test count is reported as a warning only.
+* NuGet caching is deliberately not enabled: the solution has no `PackageReference` and
+  `NuGet.Config` points `globalPackagesFolder` at the repo-local `./.nuget/packages`.
+* WPF note: on Linux the app project compiles its stub, so the solution builds on
+  `ubuntu-latest`; the real UI is still built and run on Windows.
+
+**Status:** the workflow is live and has executed on this branch. Its first run restored and
+compiled the solution for real: restore passed, the **build failed** with `CS0103` in
+`Cs2SettingsService.ApplySettingsCoreAsync` (the per-key snapshot list was declared inside the
+backup-preparation `try` block but appended after a verified success), and the tests therefore
+did not run. That scoping bug is fixed and is now covered by regression tests in
+`tests/FrameForge.Tests/ReliabilityHardeningTests.cs`. The development sandbox for this branch
+still has no .NET SDK and cannot reach `builds.dotnet.microsoft.com` or `api.nuget.org`, so
+**GitHub Actions is the authoritative build and test result** — check the **Actions** tab (or
+the checks on the pull request) for the current run.
+
 ## Safety posture
 
 | Allowed | Not allowed |
