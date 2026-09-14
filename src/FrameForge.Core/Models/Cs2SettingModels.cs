@@ -196,13 +196,23 @@ public sealed class SettingsApplyResult
     public bool AutoexecIntegrationUpdated { get; init; }
     public bool ManagedConfigExecutedByCs2 { get; init; }
 
+    /// <summary>
+    /// Diagnostics for the internal recovery snapshot that guarded this operation.
+    /// Independent of the optional user-visible backup.
+    /// </summary>
+    public ApplyRecoveryInfo Recovery { get; init; } = ApplyRecoveryInfo.None;
+
+    /// <summary>True when the operation failed AND the internal recovery could not restore everything.</summary>
+    public bool RecoveryFailed => Recovery.RestoreFailed;
+
     public static SettingsApplyResult Ok(
         string message,
         string? backupId,
         SettingsDiff diff,
         IReadOnlyList<string> files,
         bool autoexecUpdated = false,
-        bool executedByCs2 = false) => new()
+        bool executedByCs2 = false,
+        ApplyRecoveryInfo? recovery = null) => new()
     {
         Success = true,
         Message = message,
@@ -210,19 +220,22 @@ public sealed class SettingsApplyResult
         Diff = diff,
         WrittenFiles = files,
         AutoexecIntegrationUpdated = autoexecUpdated,
-        ManagedConfigExecutedByCs2 = executedByCs2
+        ManagedConfigExecutedByCs2 = executedByCs2,
+        Recovery = recovery ?? ApplyRecoveryInfo.None
     };
 
     public static SettingsApplyResult Fail(
         string message,
         string? backupId = null,
         bool rolledBack = false,
-        SettingsDiff? diff = null) => new()
+        SettingsDiff? diff = null,
+        ApplyRecoveryInfo? recovery = null) => new()
     {
         Success = false,
         Message = message,
         BackupId = backupId,
         RolledBack = rolledBack,
-        Diff = diff
+        Diff = diff,
+        Recovery = recovery ?? ApplyRecoveryInfo.None
     };
 }

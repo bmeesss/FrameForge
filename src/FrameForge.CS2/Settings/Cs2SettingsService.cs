@@ -24,6 +24,7 @@ public sealed class Cs2SettingsService : ICs2SettingsService
     private readonly IAppLog _log;
     private readonly ISettingChangeSnapshotStore? _changeSnapshots;
     private readonly IManagedConfigBaselineSink? _baselineSink;
+    private readonly IRecoverySnapshotFactory _recoveryFactory;
 
     public Cs2SettingsService(
         ICs2SettingCatalog catalog,
@@ -33,7 +34,8 @@ public sealed class Cs2SettingsService : ICs2SettingsService
         IAppSettingsService appSettings,
         IAppLog log,
         ISettingChangeSnapshotStore? changeSnapshots = null,
-        IManagedConfigBaselineSink? baselineSink = null)
+        IManagedConfigBaselineSink? baselineSink = null,
+        IRecoverySnapshotFactory? recoveryFactory = null)
     {
         _catalog = catalog;
         _config = config;
@@ -43,23 +45,59 @@ public sealed class Cs2SettingsService : ICs2SettingsService
         _log = log;
         _changeSnapshots = changeSnapshots;
         _baselineSink = baselineSink;
+        _recoveryFactory = recoveryFactory ?? new RecoverySnapshotFactory();
+    }
+
+    /// <summary>
+    /// Acquires the shared gate for the managed configuration scope (one CS2 cfg directory).
+    ///
+    /// Every read/apply/restore of that scope serializes on the same gate, so writes never
+    /// interleave and reads never observe a half-written managed cfg or autoexec.
+    /// Waiting is cancellation aware and the gate is released by <c>await using</c>.
+    /// </summary>
+    private async Task<ConfigScope> AcquireConfigScopeAsync(CancellationToken cancellationToken)
+    {
+        var install = await _detection.DetectAsync(cancellationToken).ConfigureAwait(false);
+        var cfgDirectory = install?.CfgDirectory;
+
+        if (install is null || !install.IsInstalled || string.IsNullOrWhiteSpace(cfgDirectory))
+        {
+            // Nothing managed to protect: operations will report CS2 as unavailable.
+            return new ConfigScope(install, null, null);
+        }
+
+        var lease = await ManagedConfigGate.AcquireAsync(cfgDirectory, cancellationToken).ConfigureAwait(false);
+        return new ConfigScope(install, cfgDirectory, lease);
     }
 
     public string ManagedConfigFileName => ManagedFileName;
     public string AutoexecFileName => Cs2AutoexecIntegration.AutoexecFileName;
 
-    public Task<Cs2SettingsSnapshot> DetectExecutionStatusAsync(CancellationToken cancellationToken = default) =>
-        ReadSettingsAsync(cancellationToken);
+    public async Task<Cs2SettingsSnapshot> DetectExecutionStatusAsync(CancellationToken cancellationToken = default)
+    {
+        await using var scope = await AcquireConfigScopeAsync(cancellationToken).ConfigureAwait(false);
+        return await ReadSettingsCoreAsync(scope.Install, cancellationToken).ConfigureAwait(false);
+    }
 
     public async Task<Cs2SettingsSnapshot> ReadSettingsAsync(CancellationToken cancellationToken = default)
     {
-        var install = await _detection.DetectAsync(cancellationToken).ConfigureAwait(false);
-        if (!install.IsInstalled || string.IsNullOrWhiteSpace(install.CfgDirectory))
+        await using var scope = await AcquireConfigScopeAsync(cancellationToken).ConfigureAwait(false);
+        return await ReadSettingsCoreAsync(scope.Install, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Body of a read operation. Callers must already hold the configuration scope gate.
+    /// </summary>
+    private async Task<Cs2SettingsSnapshot> ReadSettingsCoreAsync(
+        Cs2InstallInfo? install,
+        CancellationToken cancellationToken)
+    {
+        if (install is null || !install.IsInstalled || string.IsNullOrWhiteSpace(install.CfgDirectory))
         {
             return new Cs2SettingsSnapshot
             {
                 Cs2Available = false,
-                Message = install.DetectionMessage,
+                Message = install?.DetectionMessage ?? "CS2 was not detected.",
                 ExecutionStatus = Cs2ConfigExecutionStatus.Unavailable,
                 ExecutionRecommendation =
                     "CS2 was not detected. Configure a custom Steam/CS2 path in Settings, or install CS2 via Steam.",
@@ -288,7 +326,7 @@ public sealed class Cs2SettingsService : ICs2SettingsService
         };
     }
 
-    public Task<SettingsApplyResult> ApplyDiffAsync(
+    public async Task<SettingsApplyResult> ApplyDiffAsync(
         SettingsDiff diff,
         bool createBackup = true,
         CancellationToken cancellationToken = default)
@@ -300,7 +338,10 @@ public sealed class Cs2SettingsService : ICs2SettingsService
             .ToDictionary(e => e.ConfigKey, e => e.NewValue!, StringComparer.OrdinalIgnoreCase);
 
         var reason = diff.ProfileName is null ? diff.Title : $"Profile:{diff.ProfileName}";
-        return ApplySettingsAsync(desired, reason, diff.ProfileId, createBackup, cancellationToken);
+
+        await using var scope = await AcquireConfigScopeAsync(cancellationToken).ConfigureAwait(false);
+        return await ApplySettingsCoreAsync(scope, desired, reason, diff.ProfileId, createBackup, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task<SettingsApplyResult> ApplySettingsAsync(
@@ -312,6 +353,24 @@ public sealed class Cs2SettingsService : ICs2SettingsService
     {
         ArgumentNullException.ThrowIfNull(desired);
 
+        await using var scope = await AcquireConfigScopeAsync(cancellationToken).ConfigureAwait(false);
+        return await ApplySettingsCoreAsync(scope, desired, reason, profileId, createBackup, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Body of an apply operation. Callers must already hold the configuration scope gate.
+    /// The gate is never reentrant: this method (and everything it calls) must use the
+    /// *CoreAsync variants rather than the public entry points.
+    /// </summary>
+    private async Task<SettingsApplyResult> ApplySettingsCoreAsync(
+        ConfigScope scope,
+        IReadOnlyDictionary<string, string> desired,
+        string reason,
+        string? profileId,
+        bool createBackup,
+        CancellationToken cancellationToken)
+    {
         var normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (k, v) in desired)
         {
@@ -331,7 +390,7 @@ public sealed class Cs2SettingsService : ICs2SettingsService
             return SettingsApplyResult.Fail($"Validation failed: {msg}");
         }
 
-        var snapshot = await ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        var snapshot = await ReadSettingsCoreAsync(scope.Install, cancellationToken).ConfigureAwait(false);
         if (!snapshot.Cs2Available || string.IsNullOrWhiteSpace(snapshot.CfgDirectory))
         {
             return SettingsApplyResult.Fail(
@@ -356,61 +415,125 @@ public sealed class Cs2SettingsService : ICs2SettingsService
         var managedPath = snapshot.ManagedConfigPath ?? Path.Combine(snapshot.CfgDirectory, ManagedFileName);
         var autoexecPath = snapshot.AutoexecPath ?? Path.Combine(snapshot.CfgDirectory, AutoexecFileName);
 
+        // --- Pre-flight: autoexec.cfg marker structure must be unambiguous -------------------
+        // Ambiguous files (missing half, duplicates, nesting, reversed order) are never repaired
+        // silently: the apply is refused before anything is written.
+        var previousAutoexec = File.Exists(autoexecPath)
+            ? await File.ReadAllTextAsync(autoexecPath, cancellationToken).ConfigureAwait(false)
+            : string.Empty;
+
+        var markerInspection = Cs2AutoexecIntegration.InspectMarkers(previousAutoexec);
+        if (markerInspection.IsAmbiguous)
+        {
+            _log.LogError($"Refusing to modify autoexec.cfg: {markerInspection.Message}");
+            return SettingsApplyResult.Fail(
+                $"autoexec.cfg FRAMEFORGE markers are ambiguous — nothing was written. " +
+                $"{markerInspection.Message} {markerInspection.UserAction}",
+                diff: diff);
+        }
+
         // Always include both real CS2 files that may change
         var filesToBackup = new List<string> { managedPath, autoexecPath };
 
-        string? backupId = null;
-        var appSettings = await _appSettings.LoadAsync(cancellationToken).ConfigureAwait(false);
-        var shouldBackup = createBackup && appSettings.AutomaticBackup;
-
-        var previous = diff.Entries
-            .Where(e => !e.SettingId.Equals("integration.autoexec", StringComparison.OrdinalIgnoreCase))
-            .ToDictionary(e => e.ConfigKey, e => e.CurrentValue, StringComparer.OrdinalIgnoreCase);
-
-        // Always prepare per-key snapshots for every successful apply path (Phase 10).
-        var keySnaps = diff.Entries
-            .Where(e => e.IsChange &&
-                        !e.SettingId.Equals("integration.autoexec", StringComparison.OrdinalIgnoreCase))
-            .Select(e => new SettingChangeSnapshot
-            {
-                SettingId = e.SettingId,
-                ConfigKey = e.ConfigKey,
-                PreviousValue = e.CurrentValue,
-                NewValue = e.NewValue,
-                File = managedPath,
-                Timestamp = DateTimeOffset.UtcNow,
-                ProfileId = profileId,
-                Reason = reason
-            })
-            .ToList();
-
-        if (shouldBackup)
+        // --- Internal transaction recovery snapshot (always, regardless of backup settings) ---
+        // This is separate from the optional user-visible backup: it is the rollback path when
+        // AutomaticBackup is disabled or no backup could be created.
+        RecoverySnapshot? recovery = null;
+        try
         {
-            try
+            recovery = _recoveryFactory.Create(filesToBackup);
+            if (!recovery.IsComplete)
             {
-                var entry = await _backups.CreateBackupAsync(
-                    description: $"CS2 settings apply: {reason}",
-                    optimizationIds: new[] { BackupTag },
-                    affectedFiles: filesToBackup,
-                    previousValues: previous,
-                    profileId: profileId,
-                    settingChangeSnapshots: keySnaps,
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
-                backupId = entry.Id;
+                var uncaptured = string.Join(", ",
+                    recovery.Entries.Where(e => !e.Captured).Select(e => Path.GetFileName(e.Path)));
+                recovery.Dispose();
+                return SettingsApplyResult.Fail(
+                    $"Apply aborted before any change: the internal recovery snapshot could not capture {uncaptured}. " +
+                    "No files were modified.",
+                    diff: diff);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogError("Settings recovery snapshot failed; aborting apply.", ex);
+            recovery?.Dispose();
+            return SettingsApplyResult.Fail(
+                $"Apply aborted before any change: the internal recovery snapshot failed ({ex.Message}). " +
+                "No files were modified.",
+                diff: diff);
+        }
 
-                foreach (var s in keySnaps)
+        // Anything failing between the recovery snapshot and the write block must not leak
+        // the temporary snapshot: dispose it and rethrow.
+        string? backupId = null;
+
+        // Per-key snapshots are prepared for every successful apply path (Phase 10), whether or
+        // not a user backup is created. Declared *outside* the backup-prep try block because the
+        // verified success path appends them further down; assigned *inside* the try so that a
+        // failure while building them still disposes the internal recovery snapshot instead of
+        // leaking it.
+        List<SettingChangeSnapshot> keySnaps;
+
+        try
+        {
+            var appSettings = await _appSettings.LoadAsync(cancellationToken).ConfigureAwait(false);
+            var shouldBackup = createBackup && appSettings.AutomaticBackup;
+
+            var previous = diff.Entries
+                .Where(e => !e.SettingId.Equals("integration.autoexec", StringComparison.OrdinalIgnoreCase))
+                .ToDictionary(e => e.ConfigKey, e => e.CurrentValue, StringComparer.OrdinalIgnoreCase);
+
+            // Always prepare per-key snapshots for every successful apply path (Phase 10).
+            keySnaps = diff.Entries
+                .Where(e => e.IsChange &&
+                            !e.SettingId.Equals("integration.autoexec", StringComparison.OrdinalIgnoreCase))
+                .Select(e => new SettingChangeSnapshot
                 {
-                    s.BackupId = backupId;
-                }
+                    SettingId = e.SettingId,
+                    ConfigKey = e.ConfigKey,
+                    PreviousValue = e.CurrentValue,
+                    NewValue = e.NewValue,
+                    File = managedPath,
+                    Timestamp = DateTimeOffset.UtcNow,
+                    ProfileId = profileId,
+                    Reason = reason
+                })
+                .ToList();
 
-                appSettings.LastSettingsBackupId = backupId;
-                await _appSettings.SaveAsync(appSettings, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
+            if (shouldBackup)
             {
-                _log.LogError("Settings backup failed; aborting apply.", ex);
-                return SettingsApplyResult.Fail($"Backup failed; apply aborted: {ex.Message}", diff: diff);
+                try
+                {
+                    var entry = await _backups.CreateBackupAsync(
+                        description: $"CS2 settings apply: {reason}",
+                        optimizationIds: new[] { BackupTag },
+                        affectedFiles: filesToBackup,
+                        previousValues: previous,
+                        profileId: profileId,
+                        settingChangeSnapshots: keySnaps,
+                        cancellationToken: cancellationToken).ConfigureAwait(false);
+                    backupId = entry.Id;
+
+                    foreach (var s in keySnaps)
+                    {
+                        s.BackupId = backupId;
+                    }
+
+                    appSettings.LastSettingsBackupId = backupId;
+                    await _appSettings.SaveAsync(appSettings, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogError("Settings backup failed; aborting apply.", ex);
+                    recovery?.Dispose();
+                    return SettingsApplyResult.Fail($"Backup failed; apply aborted: {ex.Message}", diff: diff);
+                }
             }
+        }
+        catch
+        {
+            recovery?.Dispose();
+            throw;
         }
 
         var written = new List<string>();
@@ -445,34 +568,43 @@ public sealed class Cs2SettingsService : ICs2SettingsService
             await _config.WriteValuesAsync(managedPath, supportedOnly, cancellationToken).ConfigureAwait(false);
             written.Add(managedPath);
 
-            // 2) Ensure autoexec FRAMEFORGE section (preserve user content)
-            var previousAutoexec = File.Exists(autoexecPath)
-                ? await File.ReadAllTextAsync(autoexecPath, cancellationToken).ConfigureAwait(false)
-                : string.Empty;
-            var userOwnedBefore = Cs2AutoexecIntegration.GetUserOwnedContent(previousAutoexec);
+            // 2) Ensure autoexec FRAMEFORGE section (only the managed section may change)
             var nextAutoexec = Cs2AutoexecIntegration.EnsureFrameForgeSection(previousAutoexec);
 
             if (!string.Equals(previousAutoexec, nextAutoexec, StringComparison.Ordinal))
             {
-                // Side-car next to autoexec for extra safety (in addition to app backup)
+                // Side-car next to autoexec for extra safety (in addition to app backup + recovery snapshot)
                 if (File.Exists(autoexecPath))
                 {
                     var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
-                    AtomicFile.Copy(autoexecPath, $"{autoexecPath}.frameforge.bak.{stamp}", overwrite: false);
+                    try
+                    {
+                        AtomicFile.Copy(autoexecPath, $"{autoexecPath}.frameforge.bak.{stamp}", overwrite: false);
+                    }
+                    catch (Exception copyEx)
+                    {
+                        _log.LogWarning($"Autoexec side-car backup failed (continuing): {copyEx.Message}");
+                    }
                 }
 
-                await AtomicFile.WriteAllTextAsync(autoexecPath, nextAutoexec, cancellationToken: cancellationToken)
+                var autoexecWrite = await AtomicFile
+                    .WriteAllTextAsync(autoexecPath, nextAutoexec, cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
+                LogWriteStrategy(autoexecWrite);
                 autoexecUpdated = true;
                 written.Add(autoexecPath);
 
-                // Verify user content outside markers still present
+                // Structural verification: prefix (before BEGIN) and suffix (after END) must be
+                // byte-for-byte identical; only the managed section between the markers may change.
                 var after = await File.ReadAllTextAsync(autoexecPath, cancellationToken).ConfigureAwait(false);
-                var userOwnedAfter = Cs2AutoexecIntegration.GetUserOwnedContent(after);
-                if (!UserContentPreserved(userOwnedBefore, userOwnedAfter))
+                var structure = Cs2AutoexecIntegration.ValidateUserContentPreserved(previousAutoexec, after);
+                if (!structure.IsValid)
                 {
                     throw new InvalidOperationException(
-                        "Safety check failed: user autoexec content outside FRAMEFORGE markers would be altered.");
+                        $"Safety check failed: {structure.Reason} " +
+                        (structure.RequiresUserIntervention
+                            ? "FrameForge will not repair autoexec.cfg automatically."
+                            : string.Empty));
                 }
 
                 if (!Cs2AutoexecIntegration.SectionExecutesManagedFile(after))
@@ -504,23 +636,13 @@ public sealed class Cs2SettingsService : ICs2SettingsService
                     !string.Equals(Normalize(def, actual), Normalize(def, entry.NewValue), StringComparison.OrdinalIgnoreCase))
                 {
                     _log.LogError($"Verify failed for {entry.ConfigKey}.");
-                    if (backupId is not null)
-                    {
-                        var restore = await _backups.RestoreAsync(backupId, cancellationToken).ConfigureAwait(false);
-                        return SettingsApplyResult.Fail(
-                            $"Verification failed for '{entry.DisplayName}'. Rolled back.",
-                            backupId,
-                            rolledBack: restore.Success,
-                            diff: diff);
-                    }
-
-                    return SettingsApplyResult.Fail(
-                        $"Verification failed for '{entry.DisplayName}'.",
-                        diff: diff);
+                    throw new InvalidOperationException(
+                        $"Verification failed for '{entry.DisplayName}' (expected '{entry.NewValue}', " +
+                        $"found '{actual ?? "<missing>"}').");
                 }
             }
 
-            var post = await ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+            var post = await ReadSettingsCoreAsync(scope.Install, cancellationToken).ConfigureAwait(false);
             var filesMsg = string.Join(", ", written.Select(Path.GetFileName));
             var execNote = post.AutoexecExecutesManagedConfig
                 ? "CS2 will load these via autoexec → exec frameforge_settings.cfg (restart CS2 to apply in-game)."
@@ -572,37 +694,173 @@ public sealed class Cs2SettingsService : ICs2SettingsService
                 }
             }
 
+            // Verification passed → the internal recovery snapshot is no longer needed.
+            var cleanedUp = recovery.TryCleanup(out var cleanupError);
+            if (!cleanedUp)
+            {
+                _log.LogWarning($"Could not remove recovery snapshot {recovery.Id}: {cleanupError}");
+            }
+
+            var recoveryInfo = new ApplyRecoveryInfo
+            {
+                SnapshotCreated = true,
+                SnapshotId = recovery.Id,
+                CleanedUp = cleanedUp,
+                Message = cleanedUp ? null : cleanupError
+            };
+
             return SettingsApplyResult.Ok(
                 $"Applied changes to: {filesMsg}. {execNote}",
                 backupId,
                 resultDiff,
                 written,
                 autoexecUpdated: autoexecUpdated,
-                executedByCs2: post.AutoexecExecutesManagedConfig);
+                executedByCs2: post.AutoexecExecutesManagedConfig,
+                recovery: recoveryInfo);
         }
         catch (Exception ex)
         {
             _log.LogError("Settings apply failed.", ex);
             try { _baselineSink?.BeginSelfWrite(); } catch { /* ignore */ }
-            var rolledBack = false;
-            if (backupId is not null)
+
+            // 1) Internal recovery snapshot first: it holds the exact pre-apply bytes.
+            var recoveryReport = RestoreRecoverySnapshot(recovery);
+            var rolledBack = recoveryReport?.Success ?? false;
+            string? recoveryMessage = recoveryReport?.Message;
+
+            // 2) Fall back to the persistent user backup when recovery could not restore everything.
+            if (recoveryReport is null || !recoveryReport.Success)
             {
-                try
+                if (backupId is not null)
                 {
-                    var restore = await _backups.RestoreAsync(backupId, cancellationToken).ConfigureAwait(false);
-                    rolledBack = restore.Success;
-                }
-                catch (Exception rex)
-                {
-                    _log.LogError("Rollback after settings failure also failed.", rex);
+                    try
+                    {
+                        var restore = await _backups.RestoreAsync(backupId, cancellationToken).ConfigureAwait(false);
+                        rolledBack = restore.Success;
+                        if (restore.Success)
+                        {
+                            recoveryMessage = (recoveryMessage is null ? string.Empty : recoveryMessage + " ") +
+                                              $"Restored from backup {backupId} instead.";
+                        }
+                    }
+                    catch (Exception rex)
+                    {
+                        _log.LogError("Rollback from backup after settings failure also failed.", rex);
+                    }
                 }
             }
 
-            return SettingsApplyResult.Fail(ex.Message, backupId, rolledBack, diff);
+            var message = new StringBuilder();
+            message.Append(ex.Message);
+            if (recoveryReport is null)
+            {
+                message.Append(" INTERNAL RECOVERY FAILED: no recovery snapshot was available. " +
+                               "The CS2 configuration files may be partially modified — restore manually from a backup.");
+            }
+            else if (recoveryReport.Success)
+            {
+                message.Append(" All affected files were restored from the internal recovery snapshot.");
+            }
+            else
+            {
+                message.Append(" INTERNAL RECOVERY FAILED: ").Append(recoveryReport.Message);
+                if (recoveryReport.Details.Count > 0)
+                {
+                    message.Append(" Details: ").Append(string.Join("; ", recoveryReport.Details));
+                }
+
+                message.Append(" The CS2 configuration files may be partially modified — manual intervention required.");
+            }
+
+            if (backupId is not null)
+            {
+                message.Append($" Backup: {backupId}.");
+            }
+
+            var cleanedUpAfterFailure = recovery is not null && recovery.TryCleanup(out _);
+
+            var failureInfo = new ApplyRecoveryInfo
+            {
+                SnapshotCreated = recovery is not null,
+                SnapshotId = recovery?.Id,
+                RestoreAttempted = true,
+                RestoreSucceeded = recoveryReport?.Success ?? false,
+                CleanedUp = cleanedUpAfterFailure,
+                Message = recoveryMessage,
+                RestoredFiles = recoveryReport?.RestoredFiles ?? Array.Empty<string>(),
+                FailedFiles = recoveryReport?.FailedFiles ?? Array.Empty<string>()
+            };
+
+            return SettingsApplyResult.Fail(message.ToString(), backupId, rolledBack, diff, failureInfo);
         }
     }
 
+    /// <summary>
+    /// Restores a recovery snapshot and logs the outcome. Never throws.
+    /// Returns null when no snapshot was available.
+    /// </summary>
+    private RecoveryRestoreReport? RestoreRecoverySnapshot(RecoverySnapshot? snapshot)
+    {
+        if (snapshot is null)
+        {
+            _log.LogError("Internal recovery failed: no recovery snapshot was available.");
+            return null;
+        }
+
+        try
+        {
+            var report = snapshot.Restore();
+            if (report.Success)
+            {
+                _log.LogInformation($"Internal recovery succeeded: {report.Message}");
+            }
+            else
+            {
+                _log.LogError($"Internal recovery FAILED: {report.Message} {string.Join("; ", report.Details)}");
+            }
+
+            return report;
+        }
+        catch (Exception ex)
+        {
+            _log.LogError("Internal recovery failed with an exception.", ex);
+            return new RecoveryRestoreReport
+            {
+                Success = false,
+                Message = $"Recovery failed: {ex.Message}",
+                FailedFiles = snapshot.Entries.Select(e => e.Path).ToList()
+            };
+        }
+    }
+
+    /// <summary>
+    /// Records which write strategy <see cref="AtomicFile"/> used. The fallback path is
+    /// explicitly reported as non-atomic — never as "atomic".
+    /// </summary>
+    private void LogWriteStrategy(FileWriteResult result)
+    {
+        if (result.Strategy == FileReplaceStrategy.AtomicReplace)
+        {
+            _log.LogDebug($"Wrote '{result.Path}' with AtomicReplace.");
+            return;
+        }
+
+        _log.LogWarning(
+            $"Wrote '{result.Path}' with FallbackReplace (non-atomic; recovery copy retained: " +
+            $"{result.UsedRecoveryCopy}). {result.Detail}");
+    }
+
     public async Task<SettingsApplyResult> RestoreLastFrameForgeChangesAsync(CancellationToken cancellationToken = default)
+    {
+        await using var scope = await AcquireConfigScopeAsync(cancellationToken).ConfigureAwait(false);
+        return await RestoreLastFrameForgeChangesCoreAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Body of a restore operation. Callers must already hold the configuration scope gate:
+    /// a restore rewrites the same managed CS2 files an apply writes.
+    /// </summary>
+    private async Task<SettingsApplyResult> RestoreLastFrameForgeChangesCoreAsync(CancellationToken cancellationToken)
     {
         var app = await _appSettings.LoadAsync(cancellationToken).ConfigureAwait(false);
         var lastId = app.LastSettingsBackupId;
@@ -672,37 +930,6 @@ public sealed class Cs2SettingsService : ICs2SettingsService
                 "to create frameforge_settings.cfg and wire autoexec.cfg (user lines outside FRAMEFORGE markers stay intact).",
             _ => "CS2 cfg directory is unavailable."
         };
-    }
-
-    private static bool UserContentPreserved(string before, string after)
-    {
-        // Compare normalized (strip blank runs) so marker insertion whitespace is tolerated
-        static string Norm(string s)
-        {
-            var lines = s.Replace("\r\n", "\n").Replace('\r', '\n')
-                .Split('\n')
-                .Select(l => l.TrimEnd())
-                .Where(l => l.Length > 0);
-            return string.Join("\n", lines);
-        }
-
-        var b = Norm(before);
-        var a = Norm(after);
-        if (string.IsNullOrEmpty(b))
-        {
-            return true;
-        }
-
-        // Every non-empty user line from before must still appear in after
-        foreach (var line in b.Split('\n'))
-        {
-            if (!a.Contains(line, StringComparison.Ordinal))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private async Task MergeCfgFolderAsync(
@@ -873,5 +1100,29 @@ public sealed class Cs2SettingsService : ICs2SettingsService
         }
 
         return v;
+    }
+
+    /// <summary>
+    /// Holds the configuration-scope gate for the duration of one operation.
+    /// Dispose (via <c>await using</c>) releases the gate exactly once.
+    /// </summary>
+    private sealed class ConfigScope : IAsyncDisposable
+    {
+        private readonly ManagedConfigLease? _lease;
+
+        public ConfigScope(Cs2InstallInfo? install, string? cfgDirectory, ManagedConfigLease? lease)
+        {
+            Install = install;
+            CfgDirectory = cfgDirectory;
+            _lease = lease;
+        }
+
+        public Cs2InstallInfo? Install { get; }
+
+        public string? CfgDirectory { get; }
+
+        public bool IsGateHeld => _lease is { IsActive: true };
+
+        public ValueTask DisposeAsync() => _lease?.DisposeAsync() ?? ValueTask.CompletedTask;
     }
 }

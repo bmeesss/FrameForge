@@ -28,7 +28,21 @@ Allowed functionality is limited to:
 ## Configuration & backup safety
 
 - Existing user files are never overwritten without a side-car or catalog backup first
-- Writes use temp-file + replace where the OS allows
+- Writes use temp-file + replace where the OS allows, and report which strategy was used:
+  - `AtomicReplace` — single atomic operation (readers never see a partial file)
+  - `FallbackReplace` — **not atomic**: a recovery copy of the original is retained first, the
+    replacement is verified, and the original is restored on failure. The destination is never
+    intentionally left deleted. The fallback is never described as atomic.
+- Every apply is additionally guarded by an internal **recovery snapshot** (exact bytes + SHA-256
+  of every affected file) that is created before the first mutation, independent of the optional
+  user-visible backup, and restored + re-verified on failure. `AutomaticBackup` never disables it.
+- If recovery itself fails, the apply is a hard failure with explicit recovery information; it is
+  never reported as success.
+- Operations on the same CS2 cfg directory are serialized by one shared async gate per directory
+  (no interleaved writes, no reads of half-written files, cancellation aware, always released).
+- `autoexec.cfg` is validated **structurally**: only the managed section between
+  `// FRAMEFORGE BEGIN` and `// FRAMEFORGE END` may change. Ambiguous marker states (missing half,
+  duplicates, nesting, reversed order) are reported and left untouched — never silently repaired.
 - Unknown cfg lines and comments are preserved
 - User keys are not silently deleted on revert when a full file snapshot is unavailable
 - Corrupted backup metadata is quarantined; the app continues with an empty store
