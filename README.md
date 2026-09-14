@@ -529,15 +529,16 @@ dotnet run --project tests/FrameForge.Tests -c Release --no-build
 * WPF note: on Linux the app project compiles its stub, so the solution builds on
   `ubuntu-latest`; the real UI is still built and run on Windows.
 
-**Status:** the workflow is live and has executed on this branch. Its first run restored and
-compiled the solution for real: restore passed, the **build failed** with `CS0103` in
+**Status:** the workflow is live and green on this branch. Its first run restored and compiled
+the solution for real: restore passed, the **build failed** with `CS0103` in
 `Cs2SettingsService.ApplySettingsCoreAsync` (the per-key snapshot list was declared inside the
-backup-preparation `try` block but appended after a verified success), and the tests therefore
-did not run. That scoping bug is fixed and is now covered by regression tests in
-`tests/FrameForge.Tests/ReliabilityHardeningTests.cs`. The development sandbox for this branch
-still has no .NET SDK and cannot reach `builds.dotnet.microsoft.com` or `api.nuget.org`, so
-**GitHub Actions is the authoritative build and test result** — check the **Actions** tab (or
-the checks on the pull request) for the current run.
+backup-preparation `try` block but appended after a verified success), and the tests did not
+run. That scoping bug is fixed and covered by regression tests in
+`tests/FrameForge.Tests/ReliabilityHardeningTests.cs`; the current run reports **restore PASS,
+build PASS, 221 tests, 0 failed**. The development sandbox for this branch has no .NET SDK and
+cannot reach `builds.dotnet.microsoft.com` or `api.nuget.org`, so **GitHub Actions is the
+authoritative build and test result** — check the **Actions** tab (or the checks on the pull
+request) for the latest run.
 
 ## Safety posture
 
