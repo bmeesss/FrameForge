@@ -1,4 +1,5 @@
 using FrameForge.Core.Abstractions;
+using FrameForge.Core.IO;
 using FrameForge.Core.Models;
 
 namespace FrameForge.Optimization.Optimizations;
@@ -107,7 +108,13 @@ public sealed class Cs2ConfigValueOptimization : OptimizationBase
 
             _lastPreviousValues = previous;
 
-            await _configService.WriteValuesAsync(target, _values, cancellationToken).ConfigureAwait(false);
+            // Serialize with every other writer/reader of this cfg scope (settings apply/restore/read).
+            await using (var lease = await ManagedConfigGate
+                .AcquireAsync(Path.GetDirectoryName(target), cancellationToken)
+                .ConfigureAwait(false))
+            {
+                await _configService.WriteValuesAsync(target, _values, cancellationToken).ConfigureAwait(false);
+            }
 
             return OptimizationResult.Ok(
                 Id,
@@ -129,6 +136,10 @@ public sealed class Cs2ConfigValueOptimization : OptimizationBase
             {
                 return OptimizationResult.Fail(Id, "No previous values stored for revert. Restore from a backup instead.");
             }
+
+            await using var lease = await ManagedConfigGate
+                .AcquireAsync(Path.GetDirectoryName(_lastTargetPath), cancellationToken)
+                .ConfigureAwait(false);
 
             // Prefer restoring from the newest side-car backup created by Cs2ConfigService.
             var restoredFromSidecar = TryRestoreNewestSidecar(_lastTargetPath);

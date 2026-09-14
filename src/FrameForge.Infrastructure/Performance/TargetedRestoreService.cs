@@ -1,4 +1,5 @@
 using FrameForge.Core.Abstractions;
+using FrameForge.Core.IO;
 using FrameForge.Core.Models;
 using FrameForge.CS2.Settings;
 
@@ -326,6 +327,12 @@ public sealed class TargetedRestoreService : ITargetedRestoreService
                 $"Backup failed; targeted restore aborted: {ex.Message}",
                 assessment: assessment);
         }
+
+        // Serialize with every other writer/reader of this CS2 cfg scope (apply, restore, reads).
+        // Held until the end of the method so verification and rollback are atomic w.r.t. other operations.
+        await using var scopeLease = await ManagedConfigGate
+            .AcquireAsync(Path.GetDirectoryName(file), cancellationToken)
+            .ConfigureAwait(false);
 
         try
         {

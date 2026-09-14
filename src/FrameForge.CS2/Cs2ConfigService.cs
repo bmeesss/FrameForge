@@ -183,7 +183,7 @@ public sealed class Cs2ConfigService : ICs2ConfigService
                 document.FilePath,
                 content,
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                cancellationToken)
+                cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         _log?.LogInformation($"Wrote CS2 config: {document.FilePath}");

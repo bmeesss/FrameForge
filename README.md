@@ -30,7 +30,8 @@ It analyzes your PC and CS2 installation, recommends **safe** optimizations, man
 - **Guided confirm detail** — confirmation lists profile/name, setting count, files, current→target values, backup plan, bench plan, and risk before apply; apply phases message Creating backup / Applying / Verifying.
 - **Intelligence export/import** — `.frameforge-intelligence.json` and `.frameforge-snapshots.json`; no PII; validate + preview (default) then merge or import-as-new; imported fingerprints stay labeled Different system — never silently merged into the current machine.
 - **External cfg detection** — lightweight watcher on `frameforge_settings.cfg` and the autoexec FRAMEFORGE section only; hashes managed content; user lines outside markers do not invalidate restore safety.
-- **History reliability** — AtomicFile for history writes; corrupt JSON quarantined (not silent delete); intelligence index rebuilds from guided run files when needed.
+- **History reliability** — AtomicFile for history writes (`AtomicReplace`, with a documented non-atomic `FallbackReplace` path); corrupt JSON quarantined (not silent delete); intelligence index rebuilds from guided run files when needed.
+- **Transactional apply reliability** — every apply is guarded by an internal recovery snapshot that is independent of the optional user backup, serialized per CS2 cfg directory, and validated structurally so only the FrameForge-managed section of `autoexec.cfg` may change.
 - **Windows WPF polish (Phase 10)** — keyboard focus visuals, AutomationProperties names/help text on primary actions, tooltips, error banner not color-only, destructive actions (restore/delete/import merge) require confirmation with **Cancel** as the safest default.
 - **Benchmark comparison UX** — side-by-side Metric | Before | After | Delta | Interpretation. Unavailable metrics show **Unavailable** (never zero). Condition warnings for CPU/GPU/RAM/OS/profile/duration/interval/warm-up/CS2/fingerprint/display/power when metadata differs — warnings do not block compare.
 - **System metadata (Windows)** — GPU adapter name via `EnumDisplayDevices`, display resolution/refresh via `EnumDisplaySettings`, Game Mode (read-only registry when present), power plan name via read-only `powercfg /getactivescheme`. GPU **utilization** remains unavailable without unsafe hooks. Values are null when not reliably obtainable.
@@ -83,20 +84,38 @@ exec frameforge_settings.cfg
 
 ### What is preserved
 
-- All autoexec content **outside** `// FRAMEFORGE BEGIN` … `// FRAMEFORGE END`.
+- All autoexec content **outside** `// FRAMEFORGE BEGIN` … `// FRAMEFORGE END` — verified **structurally** (prefix before the BEGIN marker and suffix after the END marker must be byte-for-byte identical; only the managed section may change).
 - Unknown / comment lines inside any cfg FrameForge parses.
 - User binds and personal settings in autoexec.
 
 ### Apply safety flow
 
-1. **Read** actual cfg directory + merge supported keys (other cfg &lt; autoexec &lt; managed).  
+1. **Read** actual cfg directory + merge supported keys (other cfg &lt; autoexec &lt; managed) under the configuration scope lock.  
 2. **Validate** values against the catalog.  
 3. **Diff** (setting, current, new, reason, risk) + list of **real file paths**.  
 4. **Confirm** in the UI — nothing is written until you accept.  
-5. **Backup** `frameforge_settings.cfg` and `autoexec.cfg` (including “will be created” paths).  
-6. **Apply** managed file + autoexec marked section.  
-7. **Verify** written values and that user autoexec content outside markers remains; on failure **auto-rollback**.  
-8. **Reset / restore** restores snapshot bytes (and deletes files that did not exist before apply).
+5. **Check markers** — autoexec.cfg must contain either no markers or exactly one `BEGIN`…`END` pair. Ambiguous markers (missing half, duplicates, nesting, reversed order) **refuse the apply before anything is written** and ask for a manual fix. FrameForge never silently repairs an ambiguous file.  
+6. **Recovery snapshot** — an internal, temporary snapshot (exact bytes + SHA-256 of every affected file, and the knowledge that a file did not exist yet) is created **before the first mutation**. It is independent of `AutomaticBackup` and cannot be disabled by it.  
+7. **Optional user backup** of `frameforge_settings.cfg` and `autoexec.cfg` (including “will be created” paths) — controlled by `AutomaticBackup`.  
+8. **Apply** managed file + autoexec marked section.  
+9. **Verify** written values and that the user-owned prefix/suffix of autoexec are unchanged; on failure the recovery snapshot is restored and re-verified.  
+10. **Cleanup** — the recovery snapshot is deleted after a verified success.  
+11. **Reset / restore** restores snapshot bytes (and deletes files that did not exist before apply).
+
+If recovery itself fails, the apply is reported as a **hard failure** with explicit recovery information (`RECOVERY FAILED…`) and is never reported as success.
+
+### Concurrency
+
+Every operation on the same CS2 cfg directory (read, apply, restore, targeted restore, config optimizations) takes **one shared asynchronous gate per cfg directory** — not a global lock. Writes never interleave, reads never observe a half-written managed cfg or autoexec, waiting is cancellation aware, and the gate is always released in a `finally`-equivalent path (`await using`).
+
+### How files are written (AtomicFile)
+
+| Strategy | Meaning |
+|----------|---------|
+| `AtomicReplace` | The destination was swapped in with a single atomic operation (`File.Replace`, or a rename when no destination existed). A reader sees either the old or the new file — never a partial file. |
+| `FallbackReplace` | The atomic primitive was unavailable or rejected by the filesystem. **Not atomic.** A recovery copy of the original is retained first, the replacement is performed, the result is verified, and the original is restored if the replacement or verification fails. The destination is never intentionally left deleted. |
+
+Both strategies are reported in diagnostics (`FileWriteResult.Strategy`) and in the log. The fallback path is never described as atomic.
 
 ### Profiles
 
@@ -255,7 +274,7 @@ There is **no auto “this improved your FPS”** claim. Results depend on condi
 ### Cancel safety
 
 - **Before apply** (including at confirmation): stop cleanly; no cfg changes.
-- **During apply**: let apply/rollback finish via the settings service.
+- **During apply**: let apply/rollback finish via the settings service. The scope gate keeps a second operation out, and the recovery snapshot restores exact pre-apply bytes if the apply fails.
 - **During benchmark**: stop the engine; prior cfg is preserved if apply has not succeeded.
 
 ### Storage
