@@ -297,9 +297,11 @@ public sealed class ReliabilityHardeningTests
         Assert.True(applyResult.Success, applyResult.Message);
         Assert.True(restoreResult.Success, restoreResult.Message);
 
-        // The restore ran after the apply won the gate and put the pre-apply state back.
+        // The restore ran after the apply had finished, so it reverts *that* apply: the value
+        // the apply overwrote (fps_max 0, written by the seed) is back. Had the restore won the
+        // gate first it would have reverted the older backup instead and left 240 behind.
         var map = await h.ReadManagedAsync();
-        Assert.Equal("400", map["fps_max"]);
+        Assert.Equal("0", map["fps_max"]);
         Assert.Equal(1, h.Config.MaxConcurrentOperations);
     }
 
@@ -906,8 +908,12 @@ public sealed class ReliabilityHardeningTests
         return items[0];
     }
 
-    private static string NewRoot() =>
-        Path.Combine(Path.GetTempPath(), "ff_hard_" + Guid.NewGuid().ToString("N"));
+    private static string NewRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ff_hard_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        return root;
+    }
 
     private static void DeleteQuietly(string path)
     {
