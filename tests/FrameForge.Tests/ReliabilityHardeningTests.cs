@@ -174,7 +174,10 @@ public sealed class ReliabilityHardeningTests
             Assert.True(report.Success, report.Message);
             Assert.Equal(2, report.RestoredFiles.Count);
 
-            Assert.True(original.SequenceEqual(await File.ReadAllBytesAsync(existing)));
+            // Read first: byte[].SequenceEqual resolves to the ReadOnlySpan<byte> overload and a
+            // span cannot be preserved across the await boundary.
+            var restored = await File.ReadAllBytesAsync(existing);
+            Assert.True(original.SequenceEqual(restored));
             Assert.False(File.Exists(createdLater));
 
             Assert.True(snapshot.TryCleanup(out var cleanupError), cleanupError);
@@ -698,7 +701,10 @@ public sealed class ReliabilityHardeningTests
 
             Assert.True(threw, "replacement into an unwritable directory must fail loudly");
             Assert.True(File.Exists(destination), "destination must never be left deleted");
-            Assert.True(original.SequenceEqual(await File.ReadAllBytesAsync(destination)));
+            // Read first: byte[].SequenceEqual resolves to the ReadOnlySpan<byte> overload and a
+            // span cannot be preserved across the await boundary.
+            var bytesAfterFailure = await File.ReadAllBytesAsync(destination);
+            Assert.True(original.SequenceEqual(bytesAfterFailure));
 
             File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             Assert.Empty(Directory.GetFiles(directory, "*.ffrecover-*"));
